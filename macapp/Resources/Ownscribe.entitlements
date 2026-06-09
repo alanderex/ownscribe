@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The app is deliberately NOT sandboxed: it launches the ownscribe CLI
+	     (a Python venv binary) and reads/writes meeting folders under ~/ownscribe.
+	     Screen Recording and Microphone access are granted via TCC at runtime,
+	     not via entitlements. -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+</dict>
+</plist>
