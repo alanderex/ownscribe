@@ -27,6 +27,7 @@ dependencies = [
     "pyannote-audio>=4.0",
     "llama-cpp-python>=0.3",
     "huggingface-hub>=0.20",
+    "tomlkit>=0.13",
 ]
 
 [project.optional-dependencies]

@@ -155,6 +155,117 @@ class TestWarmupCommand:
         assert config.diarization.enabled is True
 
 
+class TestSpeakersFlag:
+    def test_speakers_on_record(self):
+        runner = CliRunner()
+        with _mock_config(), mock.patch("ownscribe.pipeline.run_pipeline") as mock_run:
+            result = runner.invoke(cli, ["--speakers", "3"])
+            assert result.exit_code == 0
+            config = mock_run.call_args[0][0]
+            assert config.diarization.min_speakers == 3
+            assert config.diarization.max_speakers == 3
+
+    def test_speakers_on_transcribe(self, tmp_path):
+        audio = tmp_path / "a.wav"
+        audio.write_bytes(b"RIFF")
+        runner = CliRunner()
+        with _mock_config(), mock.patch("ownscribe.pipeline.run_transcribe") as mock_run:
+            result = runner.invoke(cli, ["transcribe", str(audio), "--speakers", "2"])
+            assert result.exit_code == 0
+            config = mock_run.call_args[0][0]
+            assert config.diarization.min_speakers == 2
+            assert config.diarization.max_speakers == 2
+
+    def test_speakers_rejects_zero(self):
+        runner = CliRunner()
+        with _mock_config(), mock.patch("ownscribe.pipeline.run_pipeline"):
+            result = runner.invoke(cli, ["--speakers", "0"])
+            assert result.exit_code != 0
+
+
+class TestConfigGetSet:
+    def test_config_get_outputs_json(self):
+        runner = CliRunner()
+        with _mock_config():
+            result = runner.invoke(cli, ["config", "get"])
+        assert result.exit_code == 0
+        data = __import__("json").loads(result.output)
+        assert "summarization" in data
+        assert "audio" in data
+
+    def test_config_set_calls_io(self):
+        runner = CliRunner()
+        with (
+            _mock_config(),
+            mock.patch("ownscribe.config_io.set_config_value", return_value="/x/config.toml") as m,
+        ):
+            result = runner.invoke(cli, ["config", "set", "summarization.backend", "openai"])
+        assert result.exit_code == 0
+        m.assert_called_once_with("summarization.backend", "openai")
+        assert "Set summarization.backend" in result.output
+
+    def test_config_set_error_exits_nonzero(self):
+        runner = CliRunner()
+        with (
+            _mock_config(),
+            mock.patch("ownscribe.config_io.set_config_value", side_effect=ValueError("bad key")),
+        ):
+            result = runner.invoke(cli, ["config", "set", "x", "y"])
+        assert result.exit_code == 1
+        assert "bad key" in result.output
+
+    def test_config_no_subcommand_opens_editor(self):
+        from pathlib import Path
+
+        runner = CliRunner()
+        with (
+            _mock_config(),
+            mock.patch("ownscribe.cli.ensure_config_file", return_value=Path("/x/config.toml")),
+            mock.patch("subprocess.run") as mrun,
+        ):
+            result = runner.invoke(cli, ["config"])
+        assert result.exit_code == 0
+        mrun.assert_called_once()
+
+
+class TestSpeakerCommands:
+    def test_list_speakers(self, tmp_path):
+        p = tmp_path / "transcript.md"
+        p.write_text("**SPEAKER_00** [00:00]\nHi\n\n**SPEAKER_01** [00:05]\nYo\n")
+        runner = CliRunner()
+        with _mock_config():
+            result = runner.invoke(cli, ["list-speakers", str(p)])
+        assert result.exit_code == 0
+        assert __import__("json").loads(result.output) == ["SPEAKER_00", "SPEAKER_01"]
+
+    def test_rename_speakers(self, tmp_path):
+        p = tmp_path / "transcript.md"
+        p.write_text("**SPEAKER_00** [00:00]\nHi\n")
+        runner = CliRunner()
+        with _mock_config():
+            result = runner.invoke(cli, ["rename-speakers", str(p), "--map", "SPEAKER_00=Anna"])
+        assert result.exit_code == 0
+        assert "**Anna**" in p.read_text()
+        assert "Renamed 1" in result.output
+
+    def test_rename_speakers_bad_map(self, tmp_path):
+        p = tmp_path / "transcript.md"
+        p.write_text("**SPEAKER_00** [00:00]\nHi\n")
+        runner = CliRunner()
+        with _mock_config():
+            result = runner.invoke(cli, ["rename-speakers", str(p), "--map", "oops"])
+        assert result.exit_code != 0
+        assert "LABEL=Name" in result.output
+
+    def test_rename_speakers_requires_map(self, tmp_path):
+        p = tmp_path / "transcript.md"
+        p.write_text("**SPEAKER_00** [00:00]\nHi\n")
+        runner = CliRunner()
+        with _mock_config():
+            result = runner.invoke(cli, ["rename-speakers", str(p)])
+        assert result.exit_code != 0
+
+
 class TestCleanup:
     def test_all_yes_removes_dirs(self, tmp_path):
         config_dir = tmp_path / "config"
