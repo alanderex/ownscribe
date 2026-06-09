@@ -38,6 +38,26 @@ class TestMainCommand:
             config = mock_run.call_args[0][0]
             assert config.audio.mic is True
 
+    def test_no_mic_flag_forces_system_only(self):
+        cfg = Config()
+        cfg.audio.mic = True  # default says mic on
+        runner = CliRunner()
+        with _mock_config(cfg), mock.patch("ownscribe.pipeline.run_pipeline") as mock_run:
+            result = runner.invoke(cli, ["--no-mic"])
+            assert result.exit_code == 0
+            config = mock_run.call_args[0][0]
+            assert config.audio.mic is False
+
+    def test_mic_unset_keeps_config_default(self):
+        cfg = Config()
+        cfg.audio.mic = True
+        runner = CliRunner()
+        with _mock_config(cfg), mock.patch("ownscribe.pipeline.run_pipeline") as mock_run:
+            result = runner.invoke(cli, [])
+            assert result.exit_code == 0
+            config = mock_run.call_args[0][0]
+            assert config.audio.mic is True
+
     def test_device_flag(self):
         runner = CliRunner()
         with _mock_config(), mock.patch("ownscribe.pipeline.run_pipeline") as mock_run:
