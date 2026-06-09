@@ -15,9 +15,19 @@ single source of truth and the app never reimplements pipeline logic.
 
 ## Build & run
 
+Two options — both produce the same app.
+
+**A. No Xcode required (fastest):** builds a signed `.app` with `swiftc` alone.
+
+```bash
+./macapp/build-app.sh --run     # builds macapp/build/Ownscribe.app and opens it
+```
+
+**B. Xcode workflow:**
+
 ```bash
 cd macapp
-xcodegen generate          # writes Ownscribe.xcodeproj from project.yml
+xcodegen generate          # brew install xcodegen first; writes Ownscribe.xcodeproj
 open Ownscribe.xcodeproj    # then press ⌘R in Xcode
 ```
 
