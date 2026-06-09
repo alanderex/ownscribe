@@ -37,19 +37,30 @@ _SECTIONS: dict[str, type] = {
 }
 
 
-def config_to_dict(config: Config) -> dict:
+# Secret fields are redacted from `config get` by default so they don't leak via
+# the terminal, shell history, or a screen share. The values still live in
+# config.toml; pass reveal_secrets=True to include them.
+_SECRET_FIELDS = (("summarization", "api_key"), ("diarization", "hf_token"))
+
+
+def config_to_dict(config: Config, *, reveal_secrets: bool = False) -> dict:
     """Serialize the effective config to a nested plain dict (JSON-ready).
 
     Includes env-var overrides already applied by :meth:`Config.load`. Computed
     properties such as ``OutputConfig.resolved_dir`` are not dataclass fields and
-    are therefore omitted.
+    are therefore omitted. Secret fields are blanked unless ``reveal_secrets``.
     """
-    return dataclasses.asdict(config)
+    data = dataclasses.asdict(config)
+    if not reveal_secrets:
+        for section, key in _SECRET_FIELDS:
+            if data.get(section, {}).get(key):
+                data[section][key] = ""
+    return data
 
 
-def config_to_json(config: Config) -> str:
+def config_to_json(config: Config, *, reveal_secrets: bool = False) -> str:
     """Serialize the effective config as a pretty JSON string."""
-    return json.dumps(config_to_dict(config), indent=2, ensure_ascii=False)
+    return json.dumps(config_to_dict(config, reveal_secrets=reveal_secrets), indent=2, ensure_ascii=False)
 
 
 def _coerce(section: str, field: str, type_str: str, raw: str) -> bool | int | str:
@@ -113,7 +124,10 @@ def set_config_value(key: str, value: str) -> Path:
     # Ensure the file exists (created from the documented default template), then
     # edit it in place so the user's comments and layout survive.
     path = ensure_config_file()
-    doc = tomlkit.parse(path.read_text())
+    try:
+        doc = tomlkit.parse(path.read_text())
+    except tomlkit.exceptions.ParseError as exc:
+        raise ValueError(f"Invalid TOML in {path}: {exc}") from exc
     if section not in doc:
         doc[section] = tomlkit.table()
     doc[section][field] = coerced

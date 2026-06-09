@@ -43,6 +43,8 @@ final class AppState: ObservableObject {
     private var timer: Timer?
     private var startDate: Date?
     private var didBootstrap = false
+    private var cancelled = false
+    private var configWrite: Task<Void, Never> = Task {}
 
     private static let projectDirKey = "projectDirectory"
 
@@ -51,6 +53,18 @@ final class AppState: ObservableObject {
         let dir = stored.map { URL(fileURLWithPath: $0) } ?? URL(fileURLWithPath: NSHomeDirectory())
         cli = OwnscribeCLI(projectDirectory: dir)
         if !cli.isConfigured { phase = .needsSetup }
+
+        // Never let the spawned pipeline outlive the app: signal it on quit so
+        // it stops recording (releasing the mic / CoreAudio tap) on the way out.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            // Delivered on the main queue, so we're already on the main actor;
+            // run synchronously so the child is signaled before the app exits.
+            MainActor.assumeIsolated {
+                self?.running?.interrupt()
+            }
+        }
     }
 
     var diarizationEnabled: Bool { config.diarization.enabled }
@@ -64,29 +78,48 @@ final class AppState: ObservableObject {
         }
     }
 
+    // Picker option lists that tolerate a configured value outside the presets.
+    var modelOptions: [String] {
+        availableModels.contains(model) ? availableModels : availableModels + [model]
+    }
+
+    var languageOptions: [(label: String, code: String)] {
+        if availableLanguages.contains(where: { $0.code == language }) { return availableLanguages }
+        return availableLanguages + [(language, language)]
+    }
+
+    var templateOptions: [String] {
+        availableTemplates.contains(template) ? availableTemplates : availableTemplates + [template]
+    }
+
     // MARK: Lifecycle
 
     func bootstrap() async {
         if didBootstrap { return }
         didBootstrap = true
         guard cli.isConfigured else { phase = .needsSetup; return }
-        await reloadConfig()
+        await reloadConfig(seedQuickBar: true)
         refreshRecents()
     }
 
-    func reloadConfig() async {
+    func reloadConfig(seedQuickBar seed: Bool = false) async {
         do {
-            let cfg = try await cli.loadConfig()
-            config = cfg
-            captureMic = cfg.audio.mic
-            model = cfg.transcription.model
-            language = cfg.transcription.language.isEmpty ? "auto" : cfg.transcription.language
-            template = cfg.summarization.template.isEmpty ? "meeting" : cfg.summarization.template
-            speakerCount = cfg.diarization.minSpeakers
+            config = try await cli.loadConfig()
+            if seed { seedQuickBarFromConfig() }
             if phase == .needsSetup { phase = .idle }
         } catch {
             phase = .failed("Couldn't read ownscribe config: \(error)")
         }
+    }
+
+    private func seedQuickBarFromConfig() {
+        captureMic = config.audio.mic
+        model = config.transcription.model
+        language = config.transcription.language.isEmpty ? "auto" : config.transcription.language
+        template = config.summarization.template.isEmpty ? "meeting" : config.summarization.template
+        // The quick bar only models an exact count; show Auto for a real range.
+        speakerCount = config.diarization.minSpeakers == config.diarization.maxSpeakers
+            ? config.diarization.minSpeakers : 0
     }
 
     func setProjectDirectory(_ url: URL) {
@@ -94,7 +127,7 @@ final class AppState: ObservableObject {
         cli.projectDirectory = url
         Task {
             if cli.isConfigured {
-                await reloadConfig()
+                await reloadConfig(seedQuickBar: true)
                 refreshRecents()
             } else {
                 phase = .needsSetup
@@ -107,8 +140,13 @@ final class AppState: ObservableObject {
     private func pipelineFlags() -> [String] {
         var flags: [String] = [captureMic ? "--mic" : "--no-mic"]
         flags += ["--model", model]
-        if language != "auto" { flags += ["--language", language] }
+        // Always send language so the quick bar is authoritative: "" forces
+        // auto-detect even when config has a default language.
+        flags += ["--language", language == "auto" ? "" : language]
         flags += ["--template", template]
+        // The GUI owns Stop; disable silence auto-stop so the pipeline can't
+        // start transcribing while the UI still shows "Recording".
+        flags += ["--silence-timeout", "0"]
         if diarizationEnabled && speakerCount > 0 {
             flags += ["--speakers", String(speakerCount)]
         }
@@ -117,6 +155,14 @@ final class AppState: ObservableObject {
 
     func startRecording() {
         guard cli.isConfigured else { phase = .needsSetup; return }
+        cancelled = false
+        Task {
+            await Permissions.prime(mic: captureMic)
+            beginRecording()
+        }
+    }
+
+    private func beginRecording() {
         phase = .recording
         elapsed = 0
         startDate = Date()
@@ -145,9 +191,21 @@ final class AppState: ObservableObject {
         running?.interrupt()   // SIGINT → stop recording, continue pipeline
     }
 
+    /// Abort an in-flight transcription/summarization (recording already ended,
+    /// so no audio devices are held).
+    func cancelProcessing() {
+        guard phase == .processing else { return }
+        cancelled = true
+        running?.terminate()
+        running = nil
+        timer?.invalidate(); timer = nil
+        phase = .idle
+    }
+
     private func handlePipelineExit(_ result: CommandResult) {
         timer?.invalidate(); timer = nil
         running = nil
+        if cancelled { cancelled = false; return }
 
         guard result.ok else {
             phase = .failed(Self.firstMeaningfulLine(result.stderr)
@@ -172,18 +230,29 @@ final class AppState: ObservableObject {
         currentMeeting = meeting
         detectedSpeakers = []
         speakersNamed = false
-        if let summaryURL = meeting.summaryURL,
-           let text = try? String(contentsOf: summaryURL, encoding: .utf8) {
-            summaryText = text
-        } else if let transcriptURL = meeting.transcriptURL,
-                  let text = try? String(contentsOf: transcriptURL, encoding: .utf8) {
-            summaryText = "_(No summary — showing transcript.)_\n\n" + text
-        } else {
-            summaryText = "_(No summary or transcript found.)_"
+        summaryText = ""
+
+        let summaryURL = meeting.summaryURL
+        let transcriptURL = meeting.transcriptURL
+        Task {
+            summaryText = await Self.readMeetingText(summaryURL: summaryURL, transcriptURL: transcriptURL)
         }
-        if config.diarization.enabled, let transcript = meeting.transcriptURL {
+        if config.diarization.enabled, let transcript = transcriptURL {
             Task { detectedSpeakers = await cli.listSpeakers(transcript) }
         }
+    }
+
+    /// Read summary (or transcript fallback) off the main actor.
+    private static func readMeetingText(summaryURL: URL?, transcriptURL: URL?) async -> String {
+        await Task.detached {
+            if let url = summaryURL, let text = try? String(contentsOf: url, encoding: .utf8) {
+                return text
+            }
+            if let url = transcriptURL, let text = try? String(contentsOf: url, encoding: .utf8) {
+                return "_(No summary — showing transcript.)_\n\n" + text
+            }
+            return "_(No summary or transcript found.)_"
+        }.value
     }
 
     func open(_ meeting: Meeting) {
@@ -212,11 +281,15 @@ final class AppState: ObservableObject {
 
     // MARK: Settings
 
-    /// Persist a single config value, then reload so the UI reflects it.
+    /// Persist a single config value, then reload. Writes are serialized so two
+    /// rapid edits (e.g. a held Stepper) can't race tomlkit and corrupt the file.
     func updateConfig(_ key: String, _ value: String) {
-        Task {
-            let result = await cli.setConfig(key, value)
-            if result.ok { await reloadConfig() }
+        let previous = configWrite
+        configWrite = Task { [weak self] in
+            _ = await previous.value
+            guard let self else { return }
+            let result = await self.cli.setConfig(key, value)
+            if result.ok { await self.reloadConfig() }
         }
     }
 

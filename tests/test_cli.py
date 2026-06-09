@@ -83,6 +83,16 @@ class TestMainCommand:
             config = mock_run.call_args[0][0]
             assert config.transcription.language == "de"
 
+    def test_empty_language_forces_auto_detect(self):
+        cfg = Config()
+        cfg.transcription.language = "de"  # configured default
+        runner = CliRunner()
+        with _mock_config(cfg), mock.patch("ownscribe.pipeline.run_pipeline") as mock_run:
+            result = runner.invoke(cli, ["--language", ""])
+            assert result.exit_code == 0
+            config = mock_run.call_args[0][0]
+            assert config.transcription.language == ""  # cleared, not "de"
+
     def test_silence_timeout_flag(self):
         runner = CliRunner()
         with _mock_config(), mock.patch("ownscribe.pipeline.run_pipeline") as mock_run:
@@ -212,6 +222,26 @@ class TestConfigGetSet:
         data = __import__("json").loads(result.output)
         assert "summarization" in data
         assert "audio" in data
+
+    def test_config_get_redacts_secrets(self):
+        cfg = Config()
+        cfg.summarization.api_key = "sk-secret"
+        cfg.diarization.hf_token = "hf-secret"
+        runner = CliRunner()
+        with _mock_config(cfg):
+            result = runner.invoke(cli, ["config", "get"])
+        assert result.exit_code == 0
+        assert "sk-secret" not in result.output
+        assert "hf-secret" not in result.output
+
+    def test_config_get_reveal_secrets(self):
+        cfg = Config()
+        cfg.summarization.api_key = "sk-secret"
+        runner = CliRunner()
+        with _mock_config(cfg):
+            result = runner.invoke(cli, ["config", "get", "--reveal-secrets"])
+        assert result.exit_code == 0
+        assert "sk-secret" in result.output
 
     def test_config_set_calls_io(self):
         runner = CliRunner()

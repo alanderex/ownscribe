@@ -81,7 +81,10 @@ def cli(
     Run without a subcommand to record, transcribe, and summarize a meeting.
     """
     ctx.ensure_object(dict)
-    config = Config.load()
+    try:
+        config = Config.load()
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from None
 
     # Apply CLI overrides
     if device is not None:
@@ -96,7 +99,9 @@ def cli(
         config.output.format = output_format
     if model:
         config.transcription.model = model
-    if language:
+    # `--language ""` explicitly forces auto-detect, overriding a configured
+    # default — so test against None, not truthiness.
+    if language is not None:
         config.transcription.language = language
     if initial_prompt:
         config.transcription.initial_prompt = initial_prompt
@@ -277,12 +282,13 @@ def config_cmd(ctx: click.Context) -> None:
 
 
 @config_cmd.command("get")
+@click.option("--reveal-secrets", is_flag=True, help="Include api_key/hf_token values (redacted by default).")
 @click.pass_context
-def config_get(ctx: click.Context) -> None:
-    """Print the effective configuration as JSON."""
+def config_get(ctx: click.Context, reveal_secrets: bool) -> None:
+    """Print the effective configuration as JSON (secrets redacted by default)."""
     from ownscribe.config_io import config_to_json
 
-    click.echo(config_to_json(ctx.obj["config"]))
+    click.echo(config_to_json(ctx.obj["config"], reveal_secrets=reveal_secrets))
 
 
 @config_cmd.command("set")

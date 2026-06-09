@@ -178,9 +178,9 @@ def run_pipeline(config: Config) -> None:
             hints.append(f"Auto-stops after {silence_timeout}s of silence.")
     hints.append("Press Ctrl+C to stop.")
     click.echo(f"Starting recording... {' '.join(hints)}\n")
-    recorder.start(audio_path)
-
-    start_time = time.time()
+    # Install the stop handler BEFORE recording starts so an immediate stop
+    # (e.g. the GUI's Stop button firing right after launch) sets stop_event
+    # cleanly instead of raising KeyboardInterrupt and aborting the pipeline.
     stop_event = False
 
     def on_interrupt(sig, frame):
@@ -189,6 +189,9 @@ def run_pipeline(config: Config) -> None:
 
     original_handler = signal.getsignal(signal.SIGINT)
     signal.signal(signal.SIGINT, on_interrupt)
+
+    recorder.start(audio_path)
+    start_time = time.time()
 
     old_termios = None
     if can_mute and is_tty:

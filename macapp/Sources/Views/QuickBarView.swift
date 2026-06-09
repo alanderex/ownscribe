@@ -18,14 +18,14 @@ struct QuickBarView: View {
 
             row("Model") {
                 Picker("", selection: $app.model) {
-                    ForEach(app.availableModels, id: \.self) { Text($0).tag($0) }
+                    ForEach(app.modelOptions, id: \.self) { Text($0).tag($0) }
                 }
                 .labelsHidden()
             }
 
             row("Language") {
                 Picker("", selection: $app.language) {
-                    ForEach(app.availableLanguages, id: \.code) { lang in
+                    ForEach(app.languageOptions, id: \.code) { lang in
                         Text(lang.label).tag(lang.code)
                     }
                 }
@@ -34,7 +34,7 @@ struct QuickBarView: View {
 
             row("Template") {
                 Picker("", selection: $app.template) {
-                    ForEach(app.availableTemplates, id: \.self) { Text($0.capitalized).tag($0) }
+                    ForEach(app.templateOptions, id: \.self) { Text($0.capitalized).tag($0) }
                 }
                 .labelsHidden()
             }

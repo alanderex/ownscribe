@@ -63,14 +63,30 @@ private struct GeneralTab: View {
 private struct TranscriptionTab: View {
     @EnvironmentObject var app: AppState
 
+    private var modelOptions: [String] {
+        let current = app.config.transcription.model
+        return app.availableModels.contains(current) ? app.availableModels : app.availableModels + [current]
+    }
+
+    /// Language presets minus the "auto" pseudo-entry; include the configured
+    /// code if it isn't one of the presets so the picker never shows blank.
+    private var languageOptions: [(label: String, code: String)] {
+        var options = Array(app.availableLanguages.dropFirst())
+        let current = app.config.transcription.language
+        if !current.isEmpty && !options.contains(where: { $0.code == current }) {
+            options.append((current, current))
+        }
+        return options
+    }
+
     var body: some View {
         Form {
             Picker("Default model", selection: app.stringBinding(\.transcription.model, key: "transcription.model")) {
-                ForEach(app.availableModels, id: \.self) { Text($0).tag($0) }
+                ForEach(modelOptions, id: \.self) { Text($0).tag($0) }
             }
             Picker("Default language", selection: app.stringBinding(\.transcription.language, key: "transcription.language")) {
                 Text("Auto-detect").tag("")
-                ForEach(app.availableLanguages.dropFirst(), id: \.code) { lang in
+                ForEach(languageOptions, id: \.code) { lang in
                     Text(lang.label).tag(lang.code)
                 }
             }
@@ -151,6 +167,14 @@ private struct ConfigTextField: View {
     var help: String? = nil
     @State private var draft = ""
 
+    private var effectiveHelp: String? {
+        // Secrets come back redacted (blank), so make the keep-existing behavior explicit.
+        if secure {
+            return [help, "Leave blank to keep the saved value."].compactMap { $0 }.joined(separator: " ")
+        }
+        return help
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
@@ -166,8 +190,8 @@ private struct ConfigTextField: View {
                 Button("Set", action: commit)
                     .buttonStyle(.bordered)
             }
-            if let help {
-                Text(help)
+            if let effectiveHelp {
+                Text(effectiveHelp)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -177,6 +201,9 @@ private struct ConfigTextField: View {
     }
 
     private func commit() {
+        // Never overwrite a stored secret with a blank (the field starts blank
+        // because `config get` redacts secrets).
+        if secure && draft.isEmpty { return }
         app.updateConfig(key, draft)
     }
 }

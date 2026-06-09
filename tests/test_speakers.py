@@ -69,6 +69,20 @@ class TestJson:
         assert data["segments"][1]["speaker"] == "SPEAKER_01"
 
 
+class TestMalformedJson:
+    def test_array_json_raises_clear_error(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="Expected a JSON object"):
+            speakers.list_speakers_json("[1, 2, 3]")
+
+    def test_rename_array_json_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="Expected a JSON object"):
+            speakers.rename_json("[]", {"SPEAKER_00": "Anna"})
+
+
 class TestApplyRename:
     def test_md_file_counts_only_present(self, tmp_path, diarized_transcript):
         p = tmp_path / "transcript.md"

@@ -125,8 +125,11 @@ class Config:
         config = cls()
 
         if CONFIG_PATH.exists():
-            with open(CONFIG_PATH, "rb") as f:
-                data = tomllib.load(f)
+            try:
+                with open(CONFIG_PATH, "rb") as f:
+                    data = tomllib.load(f)
+            except tomllib.TOMLDecodeError as exc:
+                raise ValueError(f"Invalid TOML in {CONFIG_PATH}: {exc}") from exc
             config = _merge_toml(config, data)
 
         # Env var overrides

@@ -87,3 +87,35 @@ class TestSetConfigValue:
     def test_roundtrip_via_load(self, temp_config):
         config_io.set_config_value("summarization.model", "mlx-community--gemma")
         assert Config.load().summarization.model == "mlx-community--gemma"
+
+    def test_corrupt_toml_raises_value_error(self, temp_config):
+        temp_config.parent.mkdir(parents=True, exist_ok=True)
+        temp_config.write_text("this is = = not valid toml [[[")
+        with pytest.raises(ValueError, match="Invalid TOML"):
+            config_io.set_config_value("summarization.backend", "openai")
+
+
+class TestSecretRedaction:
+    def test_secrets_redacted_by_default(self):
+        cfg = Config()
+        cfg.summarization.api_key = "sk-secret"
+        cfg.diarization.hf_token = "hf-secret"
+        d = config_io.config_to_dict(cfg)
+        assert d["summarization"]["api_key"] == ""
+        assert d["diarization"]["hf_token"] == ""
+
+    def test_secrets_revealed_on_request(self):
+        cfg = Config()
+        cfg.summarization.api_key = "sk-secret"
+        d = config_io.config_to_dict(cfg, reveal_secrets=True)
+        assert d["summarization"]["api_key"] == "sk-secret"
+
+    def test_redaction_does_not_mutate_config(self):
+        cfg = Config()
+        cfg.summarization.api_key = "sk-secret"
+        config_io.config_to_dict(cfg)
+        assert cfg.summarization.api_key == "sk-secret"  # original untouched
+
+    def test_empty_secret_stays_empty(self):
+        d = config_io.config_to_dict(Config())
+        assert d["summarization"]["api_key"] == ""

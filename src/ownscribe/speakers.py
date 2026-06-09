@@ -29,9 +29,17 @@ def list_speakers_markdown(text: str) -> list[str]:
     return seen
 
 
+def _load_json_transcript(text: str) -> dict:
+    """Parse a JSON transcript, failing clearly if it isn't a JSON object."""
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected a JSON object transcript, got {type(data).__name__}")
+    return data
+
+
 def list_speakers_json(text: str) -> list[str]:
     """Return distinct speaker labels in a JSON transcript, in first-seen order."""
-    data = json.loads(text)
+    data = _load_json_transcript(text)
     seen: list[str] = []
     for seg in data.get("segments", []):
         speaker = seg.get("speaker")
@@ -52,7 +60,7 @@ def rename_markdown(text: str, mapping: dict[str, str]) -> str:
 
 def rename_json(text: str, mapping: dict[str, str]) -> str:
     """Rewrite speaker labels on segments and words in a JSON transcript."""
-    data = json.loads(text)
+    data = _load_json_transcript(text)
     for seg in data.get("segments", []):
         if seg.get("speaker") in mapping:
             seg["speaker"] = mapping[seg["speaker"]]

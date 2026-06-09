@@ -53,6 +53,11 @@ struct StatusView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+            Button(role: .destructive, action: app.cancelProcessing) {
+                Text("Cancel")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
     }
 }
