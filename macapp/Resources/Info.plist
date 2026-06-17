@@ -25,7 +25,10 @@
 	<true/>
 	<!-- The microphone is captured by the bundled ownscribe CLI on the app's
 	     behalf, so the consent prompt is attributed to this app. -->
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Ownscribe records your microphone (alongside system audio) so it can transcribe and summarize meetings locally.</string>
+	<!-- Not strictly required for CGRequestScreenCaptureAccess (the app won't crash
+	     without it, unlike the mic key), but added defensively: newer macOS may surface
+	     this purpose string in the Screen Recording prompt, and it documents intent. -->
+	<key>NSScreenRecordingUsageDescription</key>
+	<string>Ownscribe records your computer's audio (the other meeting participants) so it can transcribe and summarize meetings locally.</string>
 </dict>
 </plist>

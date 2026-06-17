@@ -46,14 +46,24 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Ownscribe records your microphone (alongside system audio) so it can transcribe and summarize meetings locally.</string>
+	<key>NSScreenRecordingUsageDescription</key>
+	<string>Ownscribe records your computer's audio (the other meeting participants) so it can transcribe and summarize meetings locally.</string>
 </dict>
 </plist>
 PLIST
 
-# Ad-hoc sign with entitlements so TCC has a stable identity for this build.
-codesign --force --sign - \
-    --entitlements "$SCRIPT_DIR/Resources/Ownscribe.entitlements" \
-    "$APP" >/dev/null 2>&1
+# Prefer a stable self-signed identity so Screen Recording / Microphone TCC grants persist
+# across rebuilds; fall back to ad-hoc (grants reset each rebuild) if it isn't set up. We try
+# the identity directly rather than `security find-identity -v`, which hides untrusted
+# self-signed certs even though codesign can use them. Create it once with make-signing-cert.sh.
+ENT="$SCRIPT_DIR/Resources/Ownscribe.entitlements"
+IDENTITY="Ownscribe Local Signing"
+if codesign --force --sign "$IDENTITY" --entitlements "$ENT" "$APP" 2>/dev/null; then
+    echo "Signed with stable identity \"$IDENTITY\" — TCC grants persist across rebuilds."
+else
+    codesign --force --sign - --entitlements "$ENT" "$APP"
+    echo "Signed ad-hoc — TCC grants reset each rebuild. For persistent grants: bash \"$SCRIPT_DIR/make-signing-cert.sh\""
+fi
 
 echo "Built: $APP"
 echo "Run with: open \"$APP\"   (or: ./macapp/build-app.sh --run)"

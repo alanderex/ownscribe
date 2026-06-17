@@ -23,6 +23,14 @@ Two options — both produce the same app.
 ./macapp/build-app.sh --run     # builds macapp/build/Ownscribe.app and opens it
 ```
 
+> The app is **ad-hoc signed** by default, so macOS resets its Screen Recording /
+> Microphone grants on every rebuild. To keep the grants across rebuilds, create a
+> stable local signing identity once — `build-app.sh` then uses it automatically:
+>
+> ```bash
+> ./macapp/make-signing-cert.sh
+> ```
+
 **B. Xcode workflow:**
 
 ```bash
@@ -50,6 +58,10 @@ each recording:
 
 If a recording produces silence or fails immediately, it's almost always a
 missing Screen Recording grant for the app.
+
+> **Persistent grants:** with ad-hoc signing the grant resets on every rebuild. Run
+> `./macapp/make-signing-cert.sh` once for a stable signing identity; after switching
+> you re-grant Screen Recording a single time, then it sticks across rebuilds.
 
 ## Known limitations
 
@@ -85,7 +97,9 @@ missing Screen Recording grant for the app.
 ```text
 macapp/
   project.yml                 XcodeGen spec (source of truth for the project)
-  Resources/Info.plist        LSUIElement (menu-bar only) + mic usage string
+  build-app.sh                no-Xcode build (swiftc + codesign)
+  make-signing-cert.sh        one-time stable signing identity (persistent TCC grants)
+  Resources/Info.plist        LSUIElement (menu-bar only) + mic & screen-recording strings
   Resources/Ownscribe.entitlements
   Sources/
     OwnscribeApp.swift        @main: MenuBarExtra + Settings window
