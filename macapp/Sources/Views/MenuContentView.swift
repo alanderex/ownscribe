@@ -13,7 +13,10 @@ struct MenuContentView: View {
                 content
                     .padding(12)
             }
-            .frame(maxHeight: 460)
+            // A definite height is required: inside a self-sizing MenuBarExtra(.window)
+            // popover the system proposes no height, so a maxHeight-only ScrollView
+            // collapses to zero and the content disappears (header/footer still show).
+            .frame(height: 420)
             Divider()
             footer
         }
