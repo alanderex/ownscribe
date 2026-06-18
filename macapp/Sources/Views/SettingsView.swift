@@ -4,18 +4,47 @@ import SwiftUI
 /// Setup configuration (rarely changed). Every control writes through
 /// `ownscribe config set`, so config.toml stays the single source of truth and
 /// stays in sync with the CLI. Per-run choices live in the quick bar instead.
+///
+/// Uses an explicit segmented tab bar rather than `TabView`: on macOS 26 a plain
+/// TabView collapses these into a "Navigation Tab Bar" overflow menu instead of
+/// showing tabs.
 struct SettingsView: View {
     @EnvironmentObject var app: AppState
+    @State private var tab: Tab = .general
+
+    enum Tab: String, CaseIterable, Identifiable {
+        case general = "General"
+        case transcription = "Transcription"
+        case summarization = "Summarization"
+        case speakers = "Speakers"
+        var id: String { rawValue }
+    }
 
     var body: some View {
-        TabView {
-            GeneralTab().tabItem { Label("General", systemImage: "gearshape") }
-            TranscriptionTab().tabItem { Label("Transcription", systemImage: "waveform") }
-            SummarizationTab().tabItem { Label("Summarization", systemImage: "text.append") }
-            DiarizationTab().tabItem { Label("Speakers", systemImage: "person.2") }
+        VStack(spacing: 0) {
+            Picker("", selection: $tab) {
+                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(12)
+
+            Divider()
+
+            ScrollView {
+                Group {
+                    switch tab {
+                    case .general: GeneralTab()
+                    case .transcription: TranscriptionTab()
+                    case .summarization: SummarizationTab()
+                    case .speakers: DiarizationTab()
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .frame(width: 480, height: 380)
-        .padding()
+        .frame(width: 560, height: 440)
     }
 }
 
@@ -23,6 +52,10 @@ struct SettingsView: View {
 
 private struct GeneralTab: View {
     @EnvironmentObject var app: AppState
+
+    private static let configURL = FileManager.default
+        .homeDirectoryForCurrentUser
+        .appendingPathComponent(".config/ownscribe/config.toml")
 
     var body: some View {
         Form {
@@ -45,6 +78,20 @@ private struct GeneralTab: View {
                 Button("Choose…") { chooseOutputFolder() }
             }
             Toggle("Keep WAV recordings", isOn: app.boolBinding(\.output.keepRecording, key: "output.keep_recording"))
+            Divider()
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Config file").font(.caption).foregroundStyle(.secondary)
+                    Text("~/.config/ownscribe/config.toml")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                Spacer()
+                Button("Reveal") {
+                    NSWorkspace.shared.activateFileViewerSelecting([Self.configURL])
+                }
+            }
         }
     }
 
@@ -101,29 +148,38 @@ private struct SummarizationTab: View {
     @EnvironmentObject var app: AppState
 
     private var backend: String { app.config.summarization.backend }
+    private var enabled: Bool { app.config.summarization.enabled }
 
     var body: some View {
         Form {
-            Picker("Backend", selection: app.stringBinding(\.summarization.backend, key: "summarization.backend")) {
-                Text("Local (built-in)").tag("local")
-                Text("Ollama").tag("ollama")
-                Text("OpenAI-compatible").tag("openai")
-            }
-            ConfigTextField(title: "Model", key: "summarization.model", keyPath: \.summarization.model)
-            if backend != "local" {
-                ConfigTextField(
-                    title: "Host", key: "summarization.host", keyPath: \.summarization.host,
-                    help: "e.g. http://127.0.0.1:8000/v1"
-                )
-            }
-            if backend == "openai" {
-                ConfigTextField(
-                    title: "API key", key: "summarization.api_key", keyPath: \.summarization.apiKey,
-                    secure: true, help: "Required by servers like oMLX."
-                )
-            }
-            Picker("Template", selection: templateBinding) {
-                ForEach(app.availableTemplates, id: \.self) { Text($0.capitalized).tag($0) }
+            Toggle("Summarize after transcription",
+                   isOn: app.boolBinding(\.summarization.enabled, key: "summarization.enabled"))
+            if enabled {
+                Picker("Backend", selection: app.stringBinding(\.summarization.backend, key: "summarization.backend")) {
+                    Text("Local (built-in)").tag("local")
+                    Text("Ollama").tag("ollama")
+                    Text("OpenAI-compatible").tag("openai")
+                }
+                ConfigTextField(title: "Model", key: "summarization.model", keyPath: \.summarization.model)
+                if backend != "local" {
+                    ConfigTextField(
+                        title: "Host", key: "summarization.host", keyPath: \.summarization.host,
+                        help: "e.g. http://127.0.0.1:8000/v1"
+                    )
+                }
+                if backend == "openai" {
+                    ConfigTextField(
+                        title: "API key", key: "summarization.api_key", keyPath: \.summarization.apiKey,
+                        secure: true, help: "Required by servers like oMLX."
+                    )
+                }
+                Picker("Template", selection: templateBinding) {
+                    ForEach(app.availableTemplates, id: \.self) { Text($0.capitalized).tag($0) }
+                }
+            } else {
+                Text("Recordings will be transcribed only — no summary is generated.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
