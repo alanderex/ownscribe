@@ -7,6 +7,15 @@ struct SummaryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Button { app.backToIdle() } label: {
+                    Label("Back", systemImage: "chevron.left")
+                }
+                .buttonStyle(.borderless)
+                .font(.callout)
+                Spacer()
+            }
+
             if let meeting = app.currentMeeting {
                 Text(meeting.title)
                     .font(.headline)

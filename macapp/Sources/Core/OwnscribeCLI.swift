@@ -5,54 +5,70 @@ enum CLIError: Error {
     case decode
 }
 
-/// Thin wrapper that drives the existing `ownscribe` CLI. Everything the app
-/// does — recording, transcribing, summarizing, reading/writing config, naming
-/// speakers — goes through the CLI, so config.toml stays the single source of
-/// truth and the GUI never reimplements pipeline logic.
+/// Drives a self-managed `ownscribe` install — no dev checkout required. The app keeps
+/// its own virtual environment under Application Support and, on first launch, installs
+/// ownscribe into it with `uv`. Everything else (record/transcribe/summarize, config,
+/// speaker naming) goes through that CLI, so `~/.config/ownscribe/config.toml` stays the
+/// single source of truth.
 final class OwnscribeCLI {
-    var projectDirectory: URL
-
-    init(projectDirectory: URL) {
-        self.projectDirectory = projectDirectory
+    /// ~/Library/Application Support/Ownscribe
+    static var managedRoot: URL {
+        let base = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+        return base.appendingPathComponent("Ownscribe", isDirectory: true)
     }
 
-    /// The console script inside the project's uv venv, if present. Running it
-    /// directly (rather than via a shell) lets us deliver SIGINT to the real
-    /// Python process for a clean Stop.
+    private var venvDir: URL { Self.managedRoot.appendingPathComponent(".venv", isDirectory: true) }
+
+    /// The git source for the ownscribe build that includes the GUI's CLI additions
+    /// (config get/set, list/rename-speakers).
+    private static let pipSpec =
+        "ownscribe[all] @ git+https://github.com/alanderex/ownscribe@feature/macos-menubar-ui"
+
+    /// The ownscribe console script in the managed venv, if installed. Running it directly
+    /// (not via a shell) lets us deliver SIGINT to the real Python process for a clean Stop.
     var cliURL: URL? {
-        let candidate = projectDirectory.appendingPathComponent(".venv/bin/ownscribe")
+        let candidate = venvDir.appendingPathComponent("bin/ownscribe")
         return FileManager.default.isExecutableFile(atPath: candidate.path) ? candidate : nil
     }
 
-    /// Recording requires the direct venv binary so Stop can signal it.
-    var isConfigured: Bool { cliURL != nil }
-
-    private func resolve(_ args: [String]) -> (URL, [String]) {
-        if let cli = cliURL {
-            return (cli, args)
-        }
-        // Fallback for read-only commands when the venv isn't found: a login
-        // shell picks up PATH (uv, pipx, …). Not used for recording.
-        let joined = (["ownscribe"] + args).map(Self.shellQuote).joined(separator: " ")
-        return (URL(fileURLWithPath: "/bin/zsh"), ["-lc", joined])
-    }
-
-    static func shellQuote(_ value: String) -> String {
-        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
-    }
+    var isInstalled: Bool { cliURL != nil }
 
     @discardableResult
     func run(_ args: [String]) async -> CommandResult {
-        let (exe, resolvedArgs) = resolve(args)
-        return await CommandRunner.run(executable: exe, args: resolvedArgs, cwd: projectDirectory)
+        guard let cli = cliURL else {
+            return CommandResult(stdout: "", stderr: "ownscribe is not installed yet.", exitCode: -1)
+        }
+        return await CommandRunner.run(executable: cli, args: args, cwd: Self.managedRoot)
     }
 
-    /// Launch the full record→transcribe→summarize pipeline (bare `ownscribe`
-    /// plus per-run flags). SIGINT to the returned process stops recording and
-    /// lets it continue to transcription + summarization.
-    func launchPipeline(flags: [String], onExit: @escaping (CommandResult) -> Void) -> RunningProcess {
-        let (exe, resolvedArgs) = resolve(flags)
-        return CommandRunner.launch(executable: exe, args: resolvedArgs, cwd: projectDirectory, onExit: onExit)
+    /// Launch the full record→transcribe→summarize pipeline. SIGINT to the returned
+    /// process stops recording and lets it continue to transcription + summarization.
+    func launchPipeline(flags: [String], onExit: @escaping (CommandResult) -> Void) -> RunningProcess? {
+        guard let cli = cliURL else { return nil }
+        return CommandRunner.launch(executable: cli, args: flags, cwd: Self.managedRoot, onExit: onExit)
+    }
+
+    /// First-run setup: create the managed venv and install ownscribe into it with `uv`.
+    /// Run through a login shell so `uv` is found on the user's PATH.
+    func install() async -> CommandResult {
+        try? FileManager.default.createDirectory(
+            at: Self.managedRoot, withIntermediateDirectories: true)
+        let script = """
+        set -e
+        if ! command -v uv >/dev/null 2>&1; then
+          echo "uv is required but was not found. Install it from https://docs.astral.sh/uv/ (e.g. 'brew install uv')." >&2
+          exit 127
+        fi
+        uv venv "\(venvDir.path)"
+        uv pip install --python "\(venvDir.path)/bin/python" "\(Self.pipSpec)"
+        """
+        return await CommandRunner.run(
+            executable: URL(fileURLWithPath: "/bin/zsh"),
+            args: ["-lc", script],
+            cwd: Self.managedRoot
+        )
     }
 
     // MARK: - High-level helpers

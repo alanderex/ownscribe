@@ -4,7 +4,7 @@ import SwiftUI
 @MainActor
 final class AppState: ObservableObject {
     enum Phase: Equatable {
-        case needsSetup
+        case installing
         case idle
         case recording
         case processing
@@ -46,13 +46,9 @@ final class AppState: ObservableObject {
     private var cancelled = false
     private var configWrite: Task<Void, Never> = Task {}
 
-    private static let projectDirKey = "projectDirectory"
-
     init() {
-        let stored = UserDefaults.standard.string(forKey: Self.projectDirKey)
-        let dir = stored.map { URL(fileURLWithPath: $0) } ?? URL(fileURLWithPath: NSHomeDirectory())
-        cli = OwnscribeCLI(projectDirectory: dir)
-        if !cli.isConfigured { phase = .needsSetup }
+        cli = OwnscribeCLI()
+        if !cli.isInstalled { phase = .installing }
 
         // Never let the spawned pipeline outlive the app: signal it on quit so
         // it stops recording (releasing the mic / CoreAudio tap) on the way out.
@@ -73,7 +69,8 @@ final class AppState: ObservableObject {
         switch phase {
         case .recording: return "record.circle.fill"
         case .processing: return "hourglass"
-        case .needsSetup, .failed: return "exclamationmark.circle"
+        case .installing: return "arrow.down.circle"
+        case .failed: return "exclamationmark.circle"
         default: return "waveform"
         }
     }
@@ -97,16 +94,30 @@ final class AppState: ObservableObject {
     func bootstrap() async {
         if didBootstrap { return }
         didBootstrap = true
-        guard cli.isConfigured else { phase = .needsSetup; return }
+        guard cli.isInstalled else { await install(); return }
         await reloadConfig(seedQuickBar: true)
         refreshRecents()
+    }
+
+    /// First-run: install the managed ownscribe environment with uv, then load config.
+    func install() async {
+        phase = .installing
+        let result = await cli.install()
+        guard result.ok, cli.isInstalled else {
+            phase = .failed("Couldn't set up ownscribe.\n"
+                + (Self.firstMeaningfulLine(result.stderr) ?? "Install failed — is `uv` installed?"))
+            return
+        }
+        await reloadConfig(seedQuickBar: true)
+        refreshRecents()
+        if phase == .installing { phase = .idle }
     }
 
     func reloadConfig(seedQuickBar seed: Bool = false) async {
         do {
             config = try await cli.loadConfig()
             if seed { seedQuickBarFromConfig() }
-            if phase == .needsSetup { phase = .idle }
+            if phase == .installing { phase = .idle }
         } catch {
             phase = .failed("Couldn't read ownscribe config: \(error)")
         }
@@ -120,19 +131,6 @@ final class AppState: ObservableObject {
         // The quick bar only models an exact count; show Auto for a real range.
         speakerCount = config.diarization.minSpeakers == config.diarization.maxSpeakers
             ? config.diarization.minSpeakers : 0
-    }
-
-    func setProjectDirectory(_ url: URL) {
-        UserDefaults.standard.set(url.path, forKey: Self.projectDirKey)
-        cli.projectDirectory = url
-        Task {
-            if cli.isConfigured {
-                await reloadConfig(seedQuickBar: true)
-                refreshRecents()
-            } else {
-                phase = .needsSetup
-            }
-        }
     }
 
     // MARK: Recording
@@ -154,7 +152,7 @@ final class AppState: ObservableObject {
     }
 
     func startRecording() {
-        guard cli.isConfigured else { phase = .needsSetup; return }
+        guard cli.isInstalled else { Task { await install() }; return }
         cancelled = false
         Task {
             await Permissions.prime(mic: captureMic)

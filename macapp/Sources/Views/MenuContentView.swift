@@ -55,8 +55,8 @@ struct MenuContentView: View {
     @ViewBuilder
     private var content: some View {
         switch app.phase {
-        case .needsSetup:
-            SetupView()
+        case .installing:
+            InstallingView()
         case .idle:
             IdleView()
         case .recording, .processing:
@@ -77,7 +77,7 @@ struct MenuContentView: View {
                 Label("Settings", systemImage: "gearshape")
             }
             .buttonStyle(.borderless)
-            .disabled(!app.cli.isConfigured)
+            .disabled(!app.cli.isInstalled)
 
             Spacer()
 

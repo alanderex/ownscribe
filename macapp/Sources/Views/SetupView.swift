@@ -1,39 +1,31 @@
-import AppKit
 import SwiftUI
 
-/// First-run prompt: point the app at the ownscribe project folder so it can
-/// find `.venv/bin/ownscribe`.
-struct SetupView: View {
+/// First-run: ownscribe isn't installed yet, so the app is setting up its own managed
+/// environment (a venv under Application Support, populated with `uv`). Shown while
+/// `AppState.install()` runs.
+struct InstallingView: View {
     @EnvironmentObject var app: AppState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Set up ownscribe", systemImage: "folder.badge.gearshape")
+            Label("Setting up Ownscribe", systemImage: "arrow.down.circle")
                 .font(.headline)
 
             Text("""
-            Choose your ownscribe project folder — the one that contains \
-            `.venv/bin/ownscribe` (created by `uv sync`).
+            Installing the transcription engine on first launch. This is a one-time \
+            download (up to a couple of GB) and can take a few minutes — you can leave \
+            this open.
             """)
             .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
 
-            Button("Choose Folder…") { chooseFolder() }
-                .buttonStyle(.borderedProminent)
-        }
-    }
-
-    private func chooseFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Use Folder"
-        panel.message = "Select the ownscribe project directory"
-        NSApp.activate(ignoringOtherApps: true)
-        if panel.runModal() == .OK, let url = panel.url {
-            app.setProjectDirectory(url)
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Working…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

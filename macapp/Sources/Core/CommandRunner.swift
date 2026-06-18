@@ -48,6 +48,13 @@ enum CommandRunner {
         if let cwd { process.currentDirectoryURL = cwd }
         process.standardInput = FileHandle.nullDevice
 
+        // A GUI app launched from Finder inherits a minimal PATH; prepend the usual
+        // Homebrew/local locations so spawned tools (uv, ffmpeg, the audio helper) resolve.
+        var env = ProcessInfo.processInfo.environment
+        let extra = "/opt/homebrew/bin:/usr/local/bin"
+        env["PATH"] = extra + ":" + (env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
+        process.environment = env
+
         let outPipe = Pipe()
         let errPipe = Pipe()
         process.standardOutput = outPipe
