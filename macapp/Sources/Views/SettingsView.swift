@@ -31,20 +31,19 @@ struct SettingsView: View {
 
             Divider()
 
-            ScrollView {
-                Group {
-                    switch tab {
-                    case .general: GeneralTab()
-                    case .transcription: TranscriptionTab()
-                    case .summarization: SummarizationTab()
-                    case .speakers: DiarizationTab()
-                    }
+            // Each tab is a Form, which scrolls itself on macOS. Don't nest it in a
+            // ScrollView — that clips the lower rows (e.g. the config-path row).
+            Group {
+                switch tab {
+                case .general: GeneralTab()
+                case .transcription: TranscriptionTab()
+                case .summarization: SummarizationTab()
+                case .speakers: DiarizationTab()
                 }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 560, height: 440)
+        .frame(width: 560, height: 480)
     }
 }
 
