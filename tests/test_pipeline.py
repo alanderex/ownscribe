@@ -61,7 +61,7 @@ class TestCreateRecorder:
         with mock.patch("ownscribe.audio.coreaudio.CoreAudioRecorder") as mock_cls:
             mock_cls.return_value.is_available.return_value = True
             _create_recorder(config)
-            mock_cls.assert_called_once_with(mic=False, mic_device="", capture_mode="picker", silence_timeout=120)
+            mock_cls.assert_called_once_with(mic=True, mic_device="", capture_mode="all", silence_timeout=120)
 
     def test_capture_mode_passed_to_coreaudio(self):
         from ownscribe.pipeline import _create_recorder
@@ -69,12 +69,12 @@ class TestCreateRecorder:
         config = Config()
         config.audio.backend = "coreaudio"
         config.audio.device = ""
-        config.audio.capture_mode = "all"
+        config.audio.capture_mode = "picker"
 
         with mock.patch("ownscribe.audio.coreaudio.CoreAudioRecorder") as mock_cls:
             mock_cls.return_value.is_available.return_value = True
             _create_recorder(config)
-            mock_cls.assert_called_once_with(mic=False, mic_device="", capture_mode="all", silence_timeout=300)
+            mock_cls.assert_called_once_with(mic=True, mic_device="", capture_mode="picker", silence_timeout=300)
 
     def test_silence_timeout_passed_to_sounddevice(self):
         from ownscribe.pipeline import _create_recorder
