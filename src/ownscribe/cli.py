@@ -39,7 +39,10 @@ def _dir_size(path: str) -> str:
 @click.option("--language", default=None, help="Language code for transcription (e.g. en, de, fr).")
 @click.option("--initial-prompt", default=None, help="Context text to prime Whisper (vocab, speaker names, etc.)")
 @click.option("--hotwords", default=None, help="Comma-separated words to boost Whisper recognition.")
-@click.option("--mic", is_flag=True, help="Also capture microphone input (mixed with system audio).")
+@click.option(
+    "--mic/--no-mic", "mic", default=None,
+    help="Capture microphone input (mixed with system audio); --no-mic forces system-only.",
+)
 @click.option("--mic-device", default=None, help="Specific mic device name (implies --mic).")
 @click.option(
     "--keep-recording/--no-keep-recording",
@@ -50,6 +53,10 @@ def _dir_size(path: str) -> str:
 @click.option(
     "--silence-timeout", default=None, type=click.IntRange(min=0),
     help="Seconds of silence before auto-stopping recording (0 to disable).",
+)
+@click.option(
+    "--speakers", default=None, type=click.IntRange(min=1),
+    help="Exact number of speakers for diarization (sets min and max).",
 )
 @click.pass_context
 def cli(
@@ -62,18 +69,22 @@ def cli(
     language: str | None,
     initial_prompt: str | None,
     hotwords: str | None,
-    mic: bool,
+    mic: bool | None,
     mic_device: str | None,
     keep_recording: bool | None,
     template: str | None,
     silence_timeout: int | None,
+    speakers: int | None,
 ) -> None:
     """Fully local meeting transcription and summarization.
 
     Run without a subcommand to record, transcribe, and summarize a meeting.
     """
     ctx.ensure_object(dict)
-    config = Config.load()
+    try:
+        config = Config.load()
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from None
 
     # Apply CLI overrides
     if device is not None:
@@ -88,22 +99,30 @@ def cli(
         config.output.format = output_format
     if model:
         config.transcription.model = model
-    if language:
+    # `--language ""` explicitly forces auto-detect, overriding a configured
+    # default — so test against None, not truthiness.
+    if language is not None:
         config.transcription.language = language
     if initial_prompt:
         config.transcription.initial_prompt = initial_prompt
     if hotwords:
         config.transcription.hotwords = hotwords
-    if mic or mic_device:
-        config.audio.mic = True
     if mic_device:
+        config.audio.mic = True
         config.audio.mic_device = mic_device
+    elif mic is True:
+        config.audio.mic = True
+    elif mic is False:
+        config.audio.mic = False
     if keep_recording is not None:
         config.output.keep_recording = keep_recording
     if template:
         config.summarization.template = template
     if silence_timeout is not None:
         config.audio.silence_timeout = silence_timeout
+    if speakers is not None:
+        config.diarization.min_speakers = speakers
+        config.diarization.max_speakers = speakers
 
     ctx.obj["config"] = config
 
@@ -143,11 +162,15 @@ def devices() -> None:
 @click.option("--diarize", is_flag=True, help="Enable speaker diarization.")
 @click.option("--model", default=None, help="Whisper model size.")
 @click.option("--language", default=None, help="Language code for transcription (e.g. en, de, fr).")
+@click.option(
+    "--speakers", default=None, type=click.IntRange(min=1),
+    help="Exact number of speakers for diarization (sets min and max).",
+)
 @click.option("--format", "output_format", type=click.Choice(["markdown", "json"]), default=None)
 @click.pass_context
 def transcribe(
     ctx: click.Context, file: str, diarize: bool,
-    model: str | None, language: str | None, output_format: str | None,
+    model: str | None, language: str | None, speakers: int | None, output_format: str | None,
 ) -> None:
     """Transcribe an audio file."""
     config = ctx.obj["config"]
@@ -157,6 +180,9 @@ def transcribe(
         config.transcription.model = model
     if language:
         config.transcription.language = language
+    if speakers is not None:
+        config.diarization.min_speakers = speakers
+        config.diarization.max_speakers = speakers
     if output_format:
         config.output.format = output_format
 
@@ -238,13 +264,92 @@ def apps() -> None:
     click.echo(recorder.list_apps())
 
 
-@cli.command("config")
-def config_cmd() -> None:
-    """Open the configuration file in your editor."""
+@cli.group("config", invoke_without_command=True)
+@click.pass_context
+def config_cmd(ctx: click.Context) -> None:
+    """Open the configuration file in your editor, or get/set values.
+
+    With no subcommand, opens config.toml in $EDITOR. Use `config get` to print
+    the effective configuration as JSON and `config set` to change a value while
+    preserving the file's comments.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
     path = ensure_config_file()
     editor = os.environ.get("EDITOR", "nano")
     click.echo(f"Opening {path} with {editor}...")
     subprocess.run([editor, str(path)])
+
+
+@config_cmd.command("get")
+@click.option("--reveal-secrets", is_flag=True, help="Include api_key/hf_token values (redacted by default).")
+@click.pass_context
+def config_get(ctx: click.Context, reveal_secrets: bool) -> None:
+    """Print the effective configuration as JSON (secrets redacted by default)."""
+    from ownscribe.config_io import config_to_json
+
+    click.echo(config_to_json(ctx.obj["config"], reveal_secrets=reveal_secrets))
+
+
+@config_cmd.command("set")
+@click.argument("key")
+@click.argument("value")
+def config_set(key: str, value: str) -> None:
+    """Set a config value, e.g. `config set summarization.backend openai`."""
+    from ownscribe.config_io import set_config_value
+
+    try:
+        path = set_config_value(key, value)
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1) from None
+    click.echo(f"Set {key} = {value} in {path}")
+
+
+def _parse_speaker_map(pairs: tuple[str, ...]) -> dict[str, str]:
+    """Parse `LABEL=Name` pairs into a mapping, failing loudly on bad input."""
+    mapping: dict[str, str] = {}
+    for pair in pairs:
+        label, sep, name = pair.partition("=")
+        label = label.strip()
+        name = name.strip()
+        if not sep or not label or not name:
+            raise click.BadParameter(
+                f"Expected LABEL=Name, got {pair!r}", param_hint="--map"
+            )
+        if "\n" in name:
+            raise click.BadParameter(f"Name may not contain newlines: {name!r}", param_hint="--map")
+        mapping[label] = name
+    return mapping
+
+
+@cli.command("list-speakers")
+@click.argument("transcript", type=click.Path(exists=True, dir_okay=False))
+def list_speakers_cmd(transcript: str) -> None:
+    """List distinct speaker labels in a transcript (JSON array)."""
+    import json
+    from pathlib import Path
+
+    from ownscribe.speakers import list_speakers
+
+    click.echo(json.dumps(list_speakers(Path(transcript))))
+
+
+@cli.command("rename-speakers")
+@click.argument("transcript", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--map", "maps", multiple=True, required=True, metavar="LABEL=Name",
+    help="Rename a speaker label, e.g. --map SPEAKER_00=Anna (repeatable).",
+)
+def rename_speakers_cmd(transcript: str, maps: tuple[str, ...]) -> None:
+    """Rename speaker labels in a transcript file (in place)."""
+    from pathlib import Path
+
+    from ownscribe.speakers import apply_rename
+
+    mapping = _parse_speaker_map(maps)
+    renamed = apply_rename(Path(transcript), mapping)
+    click.echo(f"Renamed {renamed} speaker(s) in {transcript}")
 
 
 @cli.command()

@@ -143,6 +143,7 @@ ownscribe --mic-device "MacBook Pro Microphone" # capture system audio + specifi
 ownscribe --device "MacBook Pro Microphone"   # use mic instead of system audio
 ownscribe --no-summarize                      # skip LLM summarization
 ownscribe --diarize                           # enable speaker identification
+ownscribe --diarize --speakers 3              # diarize with an exact known speaker count
 ownscribe --language en                       # set transcription language (default: auto-detect)
 ownscribe --model large-v3                    # use a larger Whisper model
 ownscribe --format json                       # output as JSON instead of markdown
@@ -162,7 +163,11 @@ ownscribe transcribe recording.wav # transcribe an audio or video file: wav/mp3/
 ownscribe summarize transcript.md  # summarize a transcript (saves alongside the input)
 ownscribe resume ./2026-02-20_1736 # resume a partial run, or process a folder's audio/video recording
 ownscribe ask "question"           # search your meetings with a natural-language question
+ownscribe list-speakers transcript.md                       # list diarized speaker labels (JSON)
+ownscribe rename-speakers transcript.md --map SPEAKER_00=Anna # name speakers in a transcript
 ownscribe config                   # open config file in $EDITOR
+ownscribe config get               # print effective config as JSON
+ownscribe config set summarization.backend openai           # set a value (keeps comments)
 ownscribe cleanup                  # remove ownscribe data from disk
 ```
 
@@ -271,6 +276,18 @@ Speaker identification requires a HuggingFace token with access to the pyannote 
 4. Run with `--diarize`
 
 On Apple Silicon Macs, diarization automatically uses the Metal Performance Shaders (MPS) GPU backend for ~10x faster processing. Set `device = "cpu"` in the `[diarization]` config section to disable this.
+
+If you already know how many people are on the call, pass `--speakers N` (sets both the min and max), which often improves speaker assignment.
+
+### Naming speakers
+
+Diarization produces anonymous labels (`SPEAKER_00`, `SPEAKER_01`, …) that aren't stable across meetings, so names are applied per transcript after the fact. Summaries don't reference speaker labels, so renaming only rewrites the transcript — no re-summarization needed:
+
+```bash
+ownscribe list-speakers transcript.md                         # ["SPEAKER_00", "SPEAKER_01"]
+ownscribe rename-speakers transcript.md \
+    --map SPEAKER_00=Anna --map SPEAKER_01=Bob                 # rewrite labels in place
+```
 
 ## Acknowledgments
 
