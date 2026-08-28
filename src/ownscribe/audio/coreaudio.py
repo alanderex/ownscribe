@@ -177,8 +177,19 @@ class CoreAudioRecorder(AudioRecorder):
                     self._silence_warning = True
                 if "[SILENCE_TIMEOUT]" in stderr_output:
                     self._silence_timed_out = True
-                # Filter out mute toggles and known informational lines
-                _NOISE_PREFIXES = ("Recording ", "Saved ", "Merged audio saved")
+                # Filter out mute toggles and known informational lines.
+                # "Mic reconfigure: audio route changed" is expected during a call —
+                # plugging in earbuds, or Meet flipping the input into voice-processing
+                # mode — and the helper rebinds the tap on its own. Only that one line is
+                # filtered: the other three "Mic reconfigure:" variants (falling back to
+                # default input / input did not return / failed to restart engine) mean
+                # the mic degraded or stopped, and must stay visible.
+                _NOISE_PREFIXES = (
+                    "Recording ",
+                    "Saved ",
+                    "Merged audio saved",
+                    "Mic reconfigure: audio route changed",
+                )
                 _NOISE_LINES = ("[MIC_MUTED]", "[MIC_UNMUTED]", "[SILENCE_TIMEOUT]")
                 lines = [
                     line for line in stderr_output.strip().splitlines()
