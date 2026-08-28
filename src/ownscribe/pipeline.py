@@ -70,8 +70,13 @@ def _titled_names(date_part: str, time_part: str, title_slug: str) -> list[str]:
     The time is dropped when a title is available — `260827-q2-sales-review` reads
     better than `260827-1400-q2-sales-review` — and only reappears to break a
     collision, e.g. a standup recorded twice in one day.
+
+    The collision suffix is separated by `_`, which _slugify strips from titles and
+    so can never occur inside a slug. With `-` the suffix would be ambiguous: a
+    meeting titled "Budget 2026" produces `260827-budget-2026`, whose trailing group
+    is indistinguishable from a time.
     """
-    return [f"{date_part}-{title_slug}", f"{date_part}-{title_slug}-{time_part}"]
+    return [f"{date_part}-{title_slug}", f"{date_part}-{title_slug}_{time_part}"]
 
 
 def _claim_dir(base: Path, names: list[str]) -> Path | None:

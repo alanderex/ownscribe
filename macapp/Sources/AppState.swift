@@ -44,6 +44,8 @@ final class AppState: ObservableObject {
     @Published var language = "auto"        // "auto" or a language code
     @Published var template = "meeting"
     @Published var speakerCount = 0          // 0 = auto-detect
+    /// Optional name for this meeting; becomes the output folder name.
+    @Published var meetingTitle = ""
 
     // Results / naming
     @Published var currentMeeting: Meeting?
@@ -163,6 +165,8 @@ final class AppState: ObservableObject {
         // auto-detect even when config has a default language.
         flags += ["--language", language == "auto" ? "" : language]
         flags += ["--template", template]
+        let title = meetingTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty { flags += ["--title", title] }
         // Honour the user's Settings value. This used to be forced to 0 because an
         // auto-stop would leave the UI showing "Recording" for the rest of the run —
         // the app had no way to see capture end. It now watches for the CLI's
@@ -184,6 +188,10 @@ final class AppState: ObservableObject {
     }
 
     private func beginRecording() {
+        // Read the flags before clearing per-run state below — pipelineFlags()
+        // consumes meetingTitle.
+        let flags = pipelineFlags()
+
         phase = .recording
         elapsed = 0
         startDate = Date()
@@ -194,12 +202,15 @@ final class AppState: ObservableObject {
         steps = []
         activeStepKey = nil
         autoStopped = false
+        // Consumed by this run: keeping it would silently name the next meeting
+        // the same and force a collision suffix.
+        meetingTitle = ""
 
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
         running = cli.launchPipeline(
-            flags: pipelineFlags(),
+            flags: flags,
             onEvent: { [weak self] event in
                 Task { @MainActor in self?.handleProgressEvent(event) }
             }

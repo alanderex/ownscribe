@@ -7,6 +7,13 @@ struct QuickBarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            row("Title") {
+                TextField("Optional", text: $app.meetingTitle)
+                    .textFieldStyle(.roundedBorder)
+                    .help("Names the output folder YYMMDD-your-title. "
+                          + "Left blank, the summary supplies a title.")
+            }
+
             row("Capture") {
                 Picker("", selection: $app.captureMic) {
                     Text("System only").tag(false)

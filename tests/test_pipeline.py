@@ -1197,9 +1197,21 @@ class TestRunDirectoryNaming:
 
         renamed = _rename_output_dir(d, "standup")
 
-        assert renamed.name == "260827-standup-1630"
+        assert renamed.name == "260827-standup_1630"
         # an *empty* leftover, by contrast, is fine to reuse
         assert (occupied / "transcript.md").read_text() == "the earlier standup"
+
+    def test_title_ending_in_digits_is_not_confused_with_a_time(self, tmp_path):
+        """`260827-budget-2026` must stay a title; hence `_` for the collision suffix."""
+        from ownscribe.pipeline import _get_output_dir
+
+        cfg = self._config(tmp_path)
+        first = _get_output_dir(cfg, "Budget 2026")
+        (first / "t.md").write_text("x")
+        second = _get_output_dir(cfg, "Budget 2026")
+
+        assert first.name.endswith("-budget-2026")
+        assert "_" in second.name and second.name.startswith(first.name + "_")
 
     def test_legacy_directories_keep_their_format(self, tmp_path):
         """Folders from before this scheme must not be reformatted under the user."""
@@ -1220,14 +1232,14 @@ class TestRunDirectoryNaming:
         audio.mkdir()
         (tmp_path / "260827-standup").mkdir()  # would push a recompute to the -1630 variant
 
-        renamed = _rename_output_dir(audio, "standup", force_name="260827-standup-9999")
+        renamed = _rename_output_dir(audio, "standup", force_name="260827-standup_9999")
 
-        assert renamed.name == "260827-standup-9999"
+        assert renamed.name == "260827-standup_9999"
 
     def test_rename_never_destroys_an_existing_directory(self, tmp_path):
         from ownscribe.pipeline import _rename_output_dir
 
-        for name in ("260827-standup", "260827-standup-1630"):
+        for name in ("260827-standup", "260827-standup_1630"):
             occupied = tmp_path / name
             occupied.mkdir()
             (occupied / "keep.md").write_text(name)
@@ -1237,7 +1249,7 @@ class TestRunDirectoryNaming:
         renamed = _rename_output_dir(d, "standup")
 
         assert renamed == d  # gave up rather than clobber
-        for name in ("260827-standup", "260827-standup-1630"):
+        for name in ("260827-standup", "260827-standup_1630"):
             assert (tmp_path / name / "keep.md").read_text() == name
 
 

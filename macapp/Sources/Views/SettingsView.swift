@@ -222,10 +222,18 @@ private struct ConfigTextField: View {
     var help: String? = nil
     @State private var draft = ""
 
+    /// True when a value for this secret is stored. `config get` blanks the value
+    /// itself, so presence is reported separately.
+    private var secretIsSet: Bool { app.config.secretsSet[key] == true }
+
     private var effectiveHelp: String? {
-        // Secrets come back redacted (blank), so make the keep-existing behavior explicit.
+        // Secrets come back redacted (blank), so say whether one is stored — otherwise
+        // the field going empty after a save is indistinguishable from a failed save.
         if secure {
-            return [help, "Leave blank to keep the saved value."].compactMap { $0 }.joined(separator: " ")
+            let state = secretIsSet
+                ? "Saved. Leave blank to keep it, or type a new value to replace it."
+                : "Not set."
+            return [help, state].compactMap { $0 }.joined(separator: " ")
         }
         return help
     }

@@ -4,6 +4,11 @@ import Foundation
 /// `.convertFromSnakeCase`, so TOML keys like `mic_device` / `api_key` map to
 /// `micDevice` / `apiKey`. Unknown keys (e.g. `templates`) are ignored.
 struct OwnscribeConfig: Codable, Equatable {
+    /// Which secrets are stored, keyed "section.field" (e.g. "diarization.hf_token").
+    /// `config get` blanks secret values, so this is the only way to tell a saved
+    /// token from no token — without it a saved field just reads back empty and
+    /// looks like the save failed.
+    var secretsSet: [String: Bool] = [:]
     var audio = Audio()
     var transcription = Transcription()
     var diarization = Diarization()
