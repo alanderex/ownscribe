@@ -23,6 +23,10 @@ xcrun -sdk macosx swiftc \
     $(find "$SCRIPT_DIR/Sources" -name '*.swift')
 
 # Concrete Info.plist (the Xcode template in Resources/ uses $(VAR) substitutions).
+# The usage-description keys below MUST match Resources/Info.plist — the two bundles are
+# built by different paths (this script vs. xcodegen) and have drifted before: e4e99da
+# dropped NSMicrophoneUsageDescription from the Xcode template only, which SIGABRTs the
+# Xcode-built app on its first mic request. A mismatch is checked for after this heredoc.
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -37,7 +41,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.12.0</string>
+	<string>0.15.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
@@ -51,6 +55,18 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+
+# Guard against the two Info.plists drifting again: both must declare the same set of
+# NS*UsageDescription keys. Missing NSMicrophoneUsageDescription is a hard crash (TCC
+# SIGABRTs the process), so this is worth failing the build over.
+built_keys=$(grep -oE 'NS[A-Za-z]+UsageDescription' "$APP/Contents/Info.plist" | sort -u)
+template_keys=$(grep -oE 'NS[A-Za-z]+UsageDescription' "$SCRIPT_DIR/Resources/Info.plist" | sort -u)
+if [ "$built_keys" != "$template_keys" ]; then
+  echo "error: usage-description keys differ between build-app.sh and Resources/Info.plist" >&2
+  echo "  built:    $(echo "$built_keys" | tr '\n' ' ')" >&2
+  echo "  template: $(echo "$template_keys" | tr '\n' ' ')" >&2
+  exit 1
+fi
 
 # Prefer a stable self-signed identity so Screen Recording / Microphone TCC grants persist
 # across rebuilds; fall back to ad-hoc (grants reset each rebuild) if it isn't set up. We try

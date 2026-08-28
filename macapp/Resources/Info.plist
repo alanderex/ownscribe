@@ -23,8 +23,13 @@
 	<!-- Menu-bar-only app: no Dock icon, no main window on launch. -->
 	<key>LSUIElement</key>
 	<true/>
-	<!-- The microphone is captured by the bundled ownscribe CLI on the app's
-	     behalf, so the consent prompt is attributed to this app. -->
+	<!-- REQUIRED. AVCaptureDevice.requestAccess(for: .audio) in Permissions.swift is
+	     SIGABRT-killed by TCC if this key is absent, so omitting it crashes the app on the
+	     first "System + Mic" recording. The microphone is captured by the bundled ownscribe
+	     CLI on the app's behalf, so the consent prompt is attributed to this app.
+	     Keep in sync with the heredoc in ../build-app.sh. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Ownscribe records your microphone (alongside system audio) so it can transcribe and summarize meetings locally.</string>
 	<!-- Not strictly required for CGRequestScreenCaptureAccess (the app won't crash
 	     without it, unlike the mic key), but added defensively: newer macOS may surface
 	     this purpose string in the Screen Recording prompt, and it documents intent. -->

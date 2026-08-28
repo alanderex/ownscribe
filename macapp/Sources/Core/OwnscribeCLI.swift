@@ -21,10 +21,26 @@ final class OwnscribeCLI {
 
     private var venvDir: URL { Self.managedRoot.appendingPathComponent(".venv", isDirectory: true) }
 
-    /// The git source for the ownscribe build that includes the GUI's CLI additions
-    /// (config get/set, list/rename-speakers).
+    /// Git ref installed on first launch. Must be an **immutable tag**, never a branch:
+    /// a branch ref silently changes what new users get, and deleting it breaks first-run
+    /// install permanently (this pointed at `feature/macos-menubar-ui` until that branch
+    /// was merged into main).
+    ///
+    /// The `macapp-` prefix keeps these tags out of upstream's `v*` namespace — upstream
+    /// tags are fetched into this repo, so an unprefixed `v0.15.1` here would collide with
+    /// paberr's release of the same name.
+    ///
+    /// PyPI `ownscribe` is published by upstream (paberr) and does not carry the GUI's CLI
+    /// additions (config get/set, list/rename-speakers), so this has to stay a git spec
+    /// until those land upstream.
+    ///
+    /// To cut a release: `git tag macapp-vX.Y.Z && git push origin macapp-vX.Y.Z`,
+    /// then bump the ref below in the same commit that bumps CFBundleShortVersionString
+    /// in build-app.sh.
+    private static let macappRelease = "macapp-v0.15.0"
+
     private static let pipSpec =
-        "ownscribe[all] @ git+https://github.com/alanderex/ownscribe@feature/macos-menubar-ui"
+        "ownscribe[all] @ git+https://github.com/alanderex/ownscribe@\(macappRelease)"
 
     /// The ownscribe console script in the managed venv, if installed. Running it directly
     /// (not via a shell) lets us deliver SIGINT to the real Python process for a clean Stop.

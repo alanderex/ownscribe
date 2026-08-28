@@ -27,6 +27,11 @@ _BINARY_CANDIDATES = [
 ]
 
 _CACHE_DIR = Path.home() / ".local" / "share" / "ownscribe" / "bin"
+# Upstream (paberr) is deliberate, not a leftover from forking: swift/ here is kept
+# byte-identical to upstream, so their released ownscribe-audio is built from exactly this
+# source and carries the same fixes. Repointing this at a fork that publishes no releases
+# would 404 and break system-audio capture entirely. If swift/ ever diverges from upstream,
+# this must change to a fork release at the same time.
 _DOWNLOAD_URL = "https://github.com/paberr/ownscribe/releases/latest/download/ownscribe-audio-{arch}"
 
 # Releases only ever publish ownscribe-audio-arm64.
