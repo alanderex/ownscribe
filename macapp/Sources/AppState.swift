@@ -12,9 +12,30 @@ final class AppState: ObservableObject {
         case failed(String)
     }
 
+    /// One row of the pipeline checklist, mirroring the CLI's own steps. Populated
+    /// from the "steps" event so the UI never has to know the pipeline's shape.
+    struct PipelineStep: Identifiable, Equatable {
+        enum State: Equatable { case pending, running, done, failed }
+
+        let key: String
+        let label: String
+        let indent: Int
+        var state: State = .pending
+        /// 0...1 when the step reports determinate progress; nil = indeterminate.
+        var fraction: Double?
+        var detail: String?
+
+        var id: String { key }
+    }
+
     // MARK: Published state
     @Published var phase: Phase = .idle
     @Published var elapsed: TimeInterval = 0
+    /// Live pipeline checklist, driven by the CLI's progress events.
+    @Published var steps: [PipelineStep] = []
+    @Published var activeStepKey: String?
+    /// True when the last recording ended by silence auto-stop rather than Stop.
+    @Published var autoStopped = false
     @Published var config = OwnscribeConfig()
 
     // Quick-bar selections (per-run), seeded from config on load.
@@ -142,9 +163,11 @@ final class AppState: ObservableObject {
         // auto-detect even when config has a default language.
         flags += ["--language", language == "auto" ? "" : language]
         flags += ["--template", template]
-        // The GUI owns Stop; disable silence auto-stop so the pipeline can't
-        // start transcribing while the UI still shows "Recording".
-        flags += ["--silence-timeout", "0"]
+        // Honour the user's Settings value. This used to be forced to 0 because an
+        // auto-stop would leave the UI showing "Recording" for the rest of the run —
+        // the app had no way to see capture end. It now watches for the CLI's
+        // recording_stopped event, so the preference can be respected.
+        flags += ["--silence-timeout", String(config.audio.silenceTimeout)]
         if diarizationEnabled && speakerCount > 0 {
             flags += ["--speakers", String(speakerCount)]
         }
@@ -168,13 +191,67 @@ final class AppState: ObservableObject {
         currentMeeting = nil
         detectedSpeakers = []
         speakersNamed = false
+        steps = []
+        activeStepKey = nil
+        autoStopped = false
 
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
-        running = cli.launchPipeline(flags: pipelineFlags()) { [weak self] result in
+        running = cli.launchPipeline(
+            flags: pipelineFlags(),
+            onEvent: { [weak self] event in
+                Task { @MainActor in self?.handleProgressEvent(event) }
+            }
+        ) { [weak self] result in
             Task { @MainActor in self?.handlePipelineExit(result) }
         }
+    }
+
+    /// Fold one NDJSON progress event from the CLI into the UI state.
+    /// Events arrive off the main thread and are hopped onto the main actor by the
+    /// caller, so this runs isolated.
+    private func handleProgressEvent(_ event: ProgressEvent) {
+        switch event.event {
+        case "recording_stopped":
+            // Capture is over and transcription is starting. Reaching this without the
+            // user pressing Stop means silence auto-stop fired — which the app used to
+            // make impossible by forcing --silence-timeout 0, because without this
+            // event it could not tell "still recording" from "transcribing".
+            guard phase == .recording else { return }
+            phase = .processing
+            timer?.invalidate(); timer = nil
+            autoStopped = event.reason == "silence_timeout"
+
+        case "steps":
+            steps = (event.steps ?? []).map {
+                PipelineStep(key: $0.key, label: $0.label, indent: $0.indent)
+            }
+
+        case "begin":
+            activeStepKey = event.key
+            updateStep(event.key) { $0.state = .running; $0.fraction = nil; $0.detail = nil }
+
+        case "progress":
+            updateStep(event.key) { $0.fraction = event.fraction }
+
+        case "detail":
+            updateStep(event.key) { $0.detail = event.text }
+
+        case "complete":
+            updateStep(event.key) { $0.state = .done; $0.fraction = nil; $0.detail = nil }
+
+        case "failed":
+            updateStep(event.key) { $0.state = .failed; $0.fraction = nil }
+
+        default:
+            break  // forward-compatible: unknown events from a newer CLI are ignored
+        }
+    }
+
+    private func updateStep(_ key: String?, _ mutate: (inout PipelineStep) -> Void) {
+        guard let key, let idx = steps.firstIndex(where: { $0.key == key }) else { return }
+        mutate(&steps[idx])
     }
 
     private func tick() {

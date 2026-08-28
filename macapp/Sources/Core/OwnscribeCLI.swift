@@ -61,9 +61,16 @@ final class OwnscribeCLI {
 
     /// Launch the full record→transcribe→summarize pipeline. SIGINT to the returned
     /// process stops recording and lets it continue to transcription + summarization.
-    func launchPipeline(flags: [String], onExit: @escaping (CommandResult) -> Void) -> RunningProcess? {
+    func launchPipeline(
+        flags: [String],
+        onEvent: ((ProgressEvent) -> Void)? = nil,
+        onExit: @escaping (CommandResult) -> Void
+    ) -> RunningProcess? {
         guard let cli = cliURL else { return nil }
-        return CommandRunner.launch(executable: cli, args: flags, cwd: Self.managedRoot, onExit: onExit)
+        return CommandRunner.launch(
+            executable: cli, args: flags, cwd: Self.managedRoot,
+            onEvent: onEvent, onExit: onExit
+        )
     }
 
     /// First-run setup: create the managed venv and install ownscribe into it with `uv`.
