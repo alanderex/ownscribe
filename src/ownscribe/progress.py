@@ -3,13 +3,60 @@
 from __future__ import annotations
 
 import itertools
+import json
 import logging
+import os
 import re
 import sys
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+
+# Machine-readable progress. Set OWNSCRIBE_PROGRESS_EVENTS=1 to replace the ANSI
+# checklist with newline-delimited JSON on stderr, one object per line. Intended for
+# GUI front-ends (the menu-bar app) that drive the CLI as a subprocess: the TUI is
+# unparseable, so without this a caller can only show an indeterminate spinner.
+#
+# An environment variable rather than a CLI flag: PipelineProgress is constructed at
+# three sites reached from five commands, and `_do_transcribe_and_summarize` is shared
+# between them, so a flag would have to be threaded through all of it. This also keeps
+# an integration hook out of the user-facing CLI surface. Precedent: HF_TOKEN,
+# OLLAMA_HOST, OPENAI_API_KEY are read the same way.
+#
+# Lines are tagged with a discriminator so a consumer can tell events apart from
+# ordinary stderr (torch/pyannote warnings): try to JSON-decode each line, and treat it
+# as an event only if it parses AND carries this key.
+_EVENTS_ENV = "OWNSCRIBE_PROGRESS_EVENTS"
+_EVENT_KEY = "ownscribe_progress"
+_EVENT_VERSION = 1
+# Progress fractions arrive per ASR batch — several per second. Emitting every one
+# would flood the pipe for sub-pixel movement, so only report meaningful change.
+_MIN_FRACTION_DELTA = 0.01
+
+
+def events_enabled() -> bool:
+    """True when the caller asked for machine-readable progress instead of the TUI."""
+    return os.environ.get(_EVENTS_ENV) == "1"
+
+
+def emit_event(event: str, **fields) -> None:
+    """Write one progress event as NDJSON to stderr, if events are enabled.
+
+    Safe to call from anywhere in the pipeline — it is a no-op in normal CLI use.
+    A single write() of a newline-terminated string keeps lines intact when several
+    threads emit concurrently.
+    """
+    if not events_enabled():
+        return
+    payload = {_EVENT_KEY: _EVENT_VERSION, "event": event, **fields}
+    try:
+        sys.stderr.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        sys.stderr.flush()
+    except Exception:
+        # Progress reporting must never take the pipeline down with it.
+        pass
+
 
 _BRAILLE = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 _FILLED = "█"
@@ -317,17 +364,42 @@ class PipelineProgress:
         self._stderr = sys.stderr
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # Machine-readable mode: emit NDJSON instead of drawing. Captured once so a
+        # mid-run environment change can't leave the display half-rendered.
+        self._events = events_enabled()
+        self._emitted_fraction: dict[str, float] = {}
 
     # -- context manager -----------------------------------------------------
 
     def __enter__(self) -> PipelineProgress:
         self._stderr = sys.stderr
+        if self._events:
+            # Send the whole checklist up front so a UI can lay out every row
+            # immediately rather than discovering steps as they start.
+            emit_event(
+                "steps",
+                steps=[
+                    {"key": s.key, "label": s.label, "indent": s.indent} for s in self._steps
+                ],
+            )
         return self
 
     def __exit__(self, *_exc) -> None:
         self._stop.set()
         if self._thread is not None:
             self._thread.join()
+        failed = _exc and _exc[0] is not None
+        if self._events:
+            # Report steps still running at teardown honestly. The drawing path below
+            # marks them complete unconditionally, which prints "done." for a step that
+            # was actually interrupted by the exception now propagating.
+            with self._lock:
+                unfinished = sorted(self._active)
+                self._active.clear()
+            for key in unfinished:
+                emit_event("failed" if failed else "complete", key=key)
+            emit_event("done", ok=not failed)
+            return
         # Final render: mark any remaining active steps as completed
         with self._lock:
             for key in list(self._active):
@@ -355,6 +427,10 @@ class PipelineProgress:
             self._active.add(key)
             self._progress.pop(key, None)
             self._details.pop(key, None)
+            self._emitted_fraction.pop(key, None)
+        if self._events:
+            emit_event("begin", key=key, label=step.label, indent=step.indent)
+            return  # no animation thread: nothing is being drawn
         # Lazy-start animation thread on first begin()
         if self._thread is None:
             self._stop.clear()
@@ -371,6 +447,7 @@ class PipelineProgress:
             self._progress.pop(key, None)
             self._details.pop(key, None)
             # If top-level step, also complete any active sub-steps
+            also_completed: list[str] = []
             if step.indent == 0:
                 for s in self._steps:
                     if s.indent > 0 and s.key in self._active:
@@ -378,6 +455,11 @@ class PipelineProgress:
                         self._completed.add(s.key)
                         self._progress.pop(s.key, None)
                         self._details.pop(s.key, None)
+                        also_completed.append(s.key)
+        if self._events:
+            for sub in also_completed:
+                emit_event("complete", key=sub)
+            emit_event("complete", key=key)
 
     def fail(self, key: str) -> None:
         """Mark a step as failed — removes from active without completing."""
@@ -385,11 +467,28 @@ class PipelineProgress:
             self._active.discard(key)
             self._progress.pop(key, None)
             self._details.pop(key, None)
+            self._emitted_fraction.pop(key, None)
+        if self._events:
+            emit_event("failed", key=key)
 
     def update(self, key: str, fraction: float) -> None:
+        should_emit = False
         with self._lock:
             if key in self._step_map:
-                self._progress[key] = max(0.0, min(1.0, fraction))
+                clamped = max(0.0, min(1.0, fraction))
+                self._progress[key] = clamped
+                if self._events:
+                    last = self._emitted_fraction.get(key)
+                    # Always emit the ends, so a bar reliably starts at 0 and reaches 1.
+                    if (
+                        last is None
+                        or abs(clamped - last) >= _MIN_FRACTION_DELTA
+                        or clamped in (0.0, 1.0)
+                    ):
+                        self._emitted_fraction[key] = clamped
+                        should_emit = True
+        if should_emit:
+            emit_event("progress", key=key, fraction=round(clamped, 4))
 
     def set_detail(self, key: str, text: str | None) -> None:
         with self._lock:
@@ -399,6 +498,8 @@ class PipelineProgress:
                 self._details[key] = text
             else:
                 self._details.pop(key, None)
+        if self._events:
+            emit_event("detail", key=key, text=text or None)
 
     def diarization_hook(self, step_name: str, _artifact, **kwargs) -> None:
         """Pyannote-compatible hook callback for diarization progress."""

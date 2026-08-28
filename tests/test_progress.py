@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import io
 from unittest import mock
 
@@ -172,3 +173,125 @@ class TestPipelineProgressDetails:
     def test_preparing_models_can_be_enabled_explicitly(self):
         progress = PipelineProgress(transcribe=False, include_prepare=True)
         assert "preparing_models" in progress._step_map
+
+
+class TestProgressEvents:
+    """NDJSON progress for GUI front-ends (OWNSCRIBE_PROGRESS_EVENTS=1).
+
+    The ANSI checklist is unparseable by a subprocess caller, so the menu-bar app could
+    only ever show an indeterminate spinner. These events are the machine-readable
+    alternative; the default (unset) path must keep drawing the TUI exactly as before.
+    """
+
+    @staticmethod
+    def _events(capsys) -> list[dict]:
+        """Every well-formed event line written to stderr, in order."""
+        import json
+
+        out = []
+        for line in capsys.readouterr().err.splitlines():
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue  # ordinary stderr (torch warnings) — not an event
+            if isinstance(obj, dict) and "ownscribe_progress" in obj:
+                out.append(obj)
+        return out
+
+    def test_disabled_by_default_emits_no_json(self, capsys, monkeypatch):
+        from ownscribe.progress import PipelineProgress
+
+        monkeypatch.delenv("OWNSCRIBE_PROGRESS_EVENTS", raising=False)
+        with PipelineProgress(summarize=True) as p:
+            p.begin("transcribing")
+            p.update("transcribing", 0.5)
+            p.complete("transcribing")
+
+        assert self._events(capsys) == []
+
+    def test_emits_the_step_list_up_front(self, capsys, monkeypatch):
+        from ownscribe.progress import PipelineProgress
+
+        monkeypatch.setenv("OWNSCRIBE_PROGRESS_EVENTS", "1")
+        with PipelineProgress(summarize=True, diarize=True):
+            pass
+
+        first = self._events(capsys)[0]
+        assert first["event"] == "steps"
+        keys = [s["key"] for s in first["steps"]]
+        assert "transcribing" in keys and "summarizing" in keys
+        # sub-steps carry their nesting so a UI can indent without knowing the pipeline
+        assert any(s["indent"] == 1 for s in first["steps"])
+
+    def test_step_lifecycle(self, capsys, monkeypatch):
+        from ownscribe.progress import PipelineProgress
+
+        monkeypatch.setenv("OWNSCRIBE_PROGRESS_EVENTS", "1")
+        with PipelineProgress() as p:
+            p.begin("transcribing")
+            p.set_detail("transcribing", "Decoding audio…")
+            p.update("transcribing", 1.0)
+            p.complete("transcribing")
+
+        seen = [(e["event"], e.get("key")) for e in self._events(capsys)]
+        assert ("begin", "transcribing") in seen
+        assert ("detail", "transcribing") in seen
+        assert ("progress", "transcribing") in seen
+        assert ("complete", "transcribing") in seen
+        assert seen[-1][0] == "done"
+
+    def test_progress_is_throttled_but_keeps_the_endpoints(self, capsys, monkeypatch):
+        from ownscribe.progress import PipelineProgress
+
+        monkeypatch.setenv("OWNSCRIBE_PROGRESS_EVENTS", "1")
+        with PipelineProgress() as p:
+            p.begin("transcribing")
+            for i in range(1000):
+                p.update("transcribing", i / 999)
+
+        fractions = [e["fraction"] for e in self._events(capsys) if e["event"] == "progress"]
+        # 1000 updates must not become 1000 lines on the pipe...
+        assert len(fractions) < 150
+        # ...but the ends have to survive, or a bar never starts empty or fills.
+        assert fractions[0] == 0.0
+        assert fractions[-1] == 1.0
+
+    def test_failure_is_reported_as_failure_not_success(self, capsys, monkeypatch):
+        """The TUI marks in-flight steps 'done' on teardown even when raising."""
+        from ownscribe.progress import PipelineProgress
+
+        monkeypatch.setenv("OWNSCRIBE_PROGRESS_EVENTS", "1")
+        with contextlib.suppress(RuntimeError), PipelineProgress() as p:
+            p.begin("transcribing")
+            raise RuntimeError("boom")
+
+        events = self._events(capsys)
+        assert ("failed", "transcribing") in [(e["event"], e.get("key")) for e in events]
+        assert events[-1] == {"ownscribe_progress": 1, "event": "done", "ok": False}
+
+    def test_explicit_fail_is_emitted(self, capsys, monkeypatch):
+        from ownscribe.progress import PipelineProgress
+
+        monkeypatch.setenv("OWNSCRIBE_PROGRESS_EVENTS", "1")
+        with PipelineProgress(summarize=True) as p:
+            p.begin("summarizing")
+            p.fail("summarizing")
+
+        assert ("failed", "summarizing") in [
+            (e["event"], e.get("key")) for e in self._events(capsys)
+        ]
+
+    def test_events_are_one_object_per_line(self, capsys, monkeypatch):
+        """A consumer reads line-by-line; a multi-line object would break framing."""
+        import json
+
+        from ownscribe.progress import PipelineProgress
+
+        monkeypatch.setenv("OWNSCRIBE_PROGRESS_EVENTS", "1")
+        with PipelineProgress(diarize=True) as p:
+            p.begin("transcribing")
+            p.set_detail("transcribing", "multi\nline\tdetail")
+            p.complete("transcribing")
+
+        for line in capsys.readouterr().err.splitlines():
+            json.loads(line)  # every line must parse standalone

@@ -20,6 +20,7 @@ from ownscribe.progress import (
     DownloadProgressEvent,
     PipelineProgress,
     download_event_fraction,
+    emit_event,
     format_download_progress,
 )
 from ownscribe.summarization import create_summarizer
@@ -251,6 +252,7 @@ def run_pipeline(config: Config) -> None:
 
     recorder.start(audio_path)
     start_time = time.time()
+    emit_event("recording_started", silence_timeout=config.audio.silence_timeout)
 
     old_termios = None
     if can_mute and is_tty:
@@ -294,7 +296,17 @@ def run_pipeline(config: Config) -> None:
         signal.signal(signal.SIGINT, original_handler)
 
     recorder.stop()
-    if getattr(recorder, "silence_timed_out", False):
+    auto_stopped = bool(getattr(recorder, "silence_timed_out", False))
+    # Tell a GUI caller that capture is over before the (long) transcription starts.
+    # Without this the app cannot distinguish "still recording" from "transcribing",
+    # which is why the menu-bar app had to disable silence auto-stop outright: an
+    # auto-stop would leave it showing "Recording" for the rest of the run.
+    emit_event(
+        "recording_stopped",
+        reason="silence_timeout" if auto_stopped else "user",
+        duration_seconds=round(time.time() - start_time, 1),
+    )
+    if auto_stopped:
         click.echo("\n\nRecording auto-stopped after silence timeout.")
     else:
         click.echo("\n\nStopping recording...")
