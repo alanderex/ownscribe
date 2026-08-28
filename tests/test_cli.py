@@ -30,13 +30,49 @@ class TestMainCommand:
             config = mock_run.call_args[0][0]
             assert config.summarization.enabled is False
 
-    def test_mic_flag(self):
+    def test_no_mic_flag(self):
         runner = CliRunner()
         with _mock_config(), mock.patch("ownscribe.pipeline.run_pipeline") as mock_run:
+            result = runner.invoke(cli, ["--no-mic"])
+            assert result.exit_code == 0
+            config = mock_run.call_args[0][0]
+            assert config.audio.mic is False
+
+    def test_mic_flag_overrides_config(self):
+        runner = CliRunner()
+        config = Config()
+        config.audio.mic = False
+        with _mock_config(config), mock.patch("ownscribe.pipeline.run_pipeline") as mock_run:
             result = runner.invoke(cli, ["--mic"])
+            assert result.exit_code == 0
+            assert mock_run.call_args[0][0].audio.mic is True
+
+    def test_mic_device_implies_mic(self):
+        runner = CliRunner()
+        config = Config()
+        config.audio.mic = False
+        with _mock_config(config), mock.patch("ownscribe.pipeline.run_pipeline") as mock_run:
+            result = runner.invoke(cli, ["--mic-device", "USB Mic"])
             assert result.exit_code == 0
             config = mock_run.call_args[0][0]
             assert config.audio.mic is True
+            assert config.audio.mic_device == "USB Mic"
+
+    def test_no_mic_wins_over_configured_mic_device(self):
+        runner = CliRunner()
+        config = Config()
+        config.audio.mic_device = "USB Mic"
+        with _mock_config(config), mock.patch("ownscribe.pipeline.run_pipeline") as mock_run:
+            result = runner.invoke(cli, ["--no-mic"])
+            assert result.exit_code == 0
+            assert mock_run.call_args[0][0].audio.mic is False
+
+    def test_no_mic_with_mic_device_errors(self):
+        runner = CliRunner()
+        with _mock_config():
+            result = runner.invoke(cli, ["--no-mic", "--mic-device", "USB Mic"])
+            assert result.exit_code != 0
+            assert "--no-mic and --mic-device cannot be used together" in result.output
 
     def test_no_mic_flag_forces_system_only(self):
         cfg = Config()
@@ -344,6 +380,32 @@ class TestCleanup:
         assert "Removed Cache" in result.output
         assert "Removed Output" in result.output
 
+    def test_all_yes_removes_separate_audio_dir(self, tmp_path):
+        config_dir = tmp_path / "config"
+        cache_dir = tmp_path / "cache"
+        output_dir = tmp_path / "output"
+        audio_dir = tmp_path / "audio-cache"
+        for d in (config_dir, cache_dir, output_dir, audio_dir):
+            d.mkdir()
+            (d / "file.txt").write_text("data")
+
+        cfg = Config()
+        cfg.output.dir = str(output_dir)
+        cfg.output.audio_dir = str(audio_dir)
+
+        runner = CliRunner()
+        with (
+            _mock_config(cfg),
+            mock.patch("ownscribe.cli._CONFIG_DIR", str(config_dir)),
+            mock.patch("ownscribe.cli._CACHE_DIR", str(cache_dir)),
+        ):
+            result = runner.invoke(cli, ["cleanup", "--all", "--yes"])
+
+        assert result.exit_code == 0
+        assert not output_dir.exists()
+        assert not audio_dir.exists()
+        assert "Removed Audio" in result.output
+
     def test_config_only(self, tmp_path):
         config_dir = tmp_path / "config"
         cache_dir = tmp_path / "cache"
@@ -367,6 +429,24 @@ class TestCleanup:
         assert not config_dir.exists()
         assert cache_dir.exists()
         assert output_dir.exists()
+
+    def test_output_only_also_removes_audio_dir(self, tmp_path):
+        output_dir = tmp_path / "output"
+        audio_dir = tmp_path / "audio-cache"
+        output_dir.mkdir()
+        audio_dir.mkdir()
+
+        cfg = Config()
+        cfg.output.dir = str(output_dir)
+        cfg.output.audio_dir = str(audio_dir)
+
+        runner = CliRunner()
+        with _mock_config(cfg):
+            result = runner.invoke(cli, ["cleanup", "--output", "--yes"])
+
+        assert result.exit_code == 0
+        assert not output_dir.exists()
+        assert not audio_dir.exists()
 
     def test_skips_missing_dirs(self, tmp_path):
         cfg = Config()

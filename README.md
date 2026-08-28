@@ -42,7 +42,7 @@ All audio, transcripts, and summaries remain local.
 ## Features
 
 - **System audio capture** — records all system audio natively via Core Audio Taps (macOS 14.2+), no virtual audio drivers needed
-- **Microphone capture** — optionally record system + mic audio simultaneously with `--mic`
+- **Microphone capture** — records system + mic audio simultaneously by default (press `m` to mute/unmute, or use `--no-mic`)
 - **WhisperX transcription** — fast, accurate speech-to-text with word-level timestamps
 - **Speaker diarization** — optional speaker identification via pyannote (requires HuggingFace token)
 - **Pipeline progress** — live checklist showing transcription, diarization sub-steps, and summarization progress
@@ -55,7 +55,7 @@ All audio, transcripts, and summaries remain local.
 
 ## Requirements
 
-- macOS 14.2+ (for system audio capture)
+- macOS 14.2+ on Apple Silicon (for system audio capture)
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
 - [ffmpeg](https://ffmpeg.org/) — `brew install ffmpeg`
@@ -65,12 +65,24 @@ Summarization works out of the box — a local model (Phi-4-mini, ~2.4 GB) downl
 
 Works with any app that outputs audio through Core Audio (Zoom, Teams, Meet, etc.).
 
+> **Apple Silicon only.** The `ownscribe-audio` capture helper is published for `arm64` only. On an
+> Intel Mac, ownscribe says so and falls back to microphone-only recording; build the helper yourself
+> with `bash swift/build.sh` to capture system audio there. Transcription and summarization work on
+> any platform.
+
 > **Tip:** Your terminal app (Terminal, iTerm2, VS Code, etc.) needs **Screen Recording** permission to capture system audio.
 > Open the settings panel directly with:
 > ```bash
 > open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
 > ```
-> Enable your terminal app, then restart it.
+> Enable your terminal app, then restart it. Both capture modes need this permission, `picker` and `all` alike.
+>
+> The microphone is recorded by default, so macOS also asks for **Microphone** permission on the first run.
+> If you dismissed that prompt, enable your terminal app here:
+> ```bash
+> open "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+> ```
+> Recording fails to start while the microphone is unavailable — use `--no-mic` to capture system audio only.
 
 ## Installation
 
@@ -92,6 +104,15 @@ uv add 'ownscribe[openai]'   # use any OpenAI-compatible server (LM Studio, llam
 uv add 'ownscribe[all]'      # install both
 ```
 
+### Homebrew
+
+There is no brew formula: Homebrew builds Python dependencies from source, which doesn't work well for the PyTorch and llama-cpp-python stack. The closest thing is installing [uv](https://docs.astral.sh/uv/) via brew and letting it manage a global `ownscribe` command:
+
+```bash
+brew install uv
+uv tool install 'ownscribe[all]'
+```
+
 ### From source
 
 ```bash
@@ -104,6 +125,10 @@ bash swift/build.sh
 
 # Install with all backends
 uv sync --extra all
+
+# Make the `ownscribe` command available globally (editable: changes to the
+# checkout take effect without reinstalling)
+uv tool install --editable .
 ```
 
 When installed from source, the `ownscribe` command lives inside the project's
@@ -122,24 +147,24 @@ then call `ownscribe` directly. The examples in [Usage](#usage) use the bare
 ### Record, transcribe, and summarize a meeting
 
 ```bash
-ownscribe                    # records system audio, Ctrl+C to stop
+ownscribe                    # records system audio + mic, Ctrl+C to stop
 ```
 
 This will:
-1. Capture system audio until you press Ctrl+C (or auto-stop after 5 minutes of silence)
+1. Capture system audio and your microphone until you press Ctrl+C (or auto-stop after 5 minutes of silence); press `m` to mute/unmute the mic while recording
 2. Transcribe with WhisperX
 3. Summarize with your local LLM
-4. Save everything to `~/ownscribe/YYYY-MM-DD_HHMMSS/`
+4. Save everything to `~/ownscribe/YYYY-MM-DD_HHMM/`, renamed to `~/ownscribe/YYYY-MM-DD_HHMM_meeting-title/` once the summary produces a title
 
-> **Note:** By default, macOS shows a source picker on each launch so you can choose what to capture. To skip it and always record all system audio, set `capture_mode = "all"` in the `[audio]` config section.
+> **Note:** By default, ownscribe records all system audio directly with no prompt. To show a macOS source picker on each launch instead, set `capture_mode = "picker"` in the `[audio]` config section.
 
 On first run, WhisperX / pyannote and the summarization model may download model files. ownscribe shows a `Preparing models` step and best-effort download progress in the TUI while this happens. Use `ownscribe warmup` to pre-download all models.
 
 ### Options
 
 ```bash
-ownscribe --mic                               # capture system audio + default mic (press 'm' to mute/unmute)
-ownscribe --mic-device "MacBook Pro Microphone" # capture system audio + specific mic
+ownscribe --no-mic                            # capture system audio only (the mic is on by default)
+ownscribe --mic-device "MacBook Pro Microphone" # capture system audio + a specific mic instead of the default one
 ownscribe --device "MacBook Pro Microphone"   # use mic instead of system audio
 ownscribe --no-summarize                      # skip LLM summarization
 ownscribe --diarize                           # enable speaker identification
@@ -205,14 +230,15 @@ Config is stored at `~/.config/ownscribe/config.toml`. Run `ownscribe config` to
 [audio]
 backend = "coreaudio"     # "coreaudio" or "sounddevice"
 device = ""               # empty = system audio
-mic = false               # also capture microphone input
+mic = true                # also capture microphone input
 mic_device = ""           # specific mic device name (empty = default)
-capture_mode = "picker"   # "picker" = show source picker; "all" = capture all system audio directly
+capture_mode = "all"      # "all" = capture all system audio directly; "picker" = show source picker
 silence_timeout = 300     # seconds of silence before auto-stop; 0 = disabled
 
 [transcription]
 model = "base"            # tiny, base, small, medium, large-v3
 language = ""             # empty = auto-detect
+threads = 0               # CPU threads for transcription; 0 = auto-detect from core count
 # initial_prompt = ""     # prime Whisper with context: domain vocab, speaker names, expected phrases
 # hotwords = ""           # comma-separated words to boost recognition (softer hint than initial_prompt)
 
@@ -229,7 +255,8 @@ model = "phi-4-mini"      # local: "phi-4-mini", path to GGUF, or hf:owner/repo/
 # host = "http://localhost:11434"  # only for ollama/openai backends
 # api_key = ""            # only for openai backend; required by servers like oMLX (or set OPENAI_API_KEY)
 # template = "meeting"    # "meeting", "lecture", "brief", or a custom name
-# context_size = 0        # 0 = auto-detect from model; set manually for OpenAI-compatible backends
+# context_size = 0        # context window in tokens; 0 = auto-detect (8192 for local). Longer
+                          # transcripts are summarized in chunks and merged, whatever the size.
 
 # Custom templates (optional):
 # [templates.my-standup]
@@ -238,6 +265,7 @@ model = "phi-4-mini"      # local: "phi-4-mini", path to GGUF, or hf:owner/repo/
 
 [output]
 dir = "~/ownscribe"
+audio_dir = ""            # directory for audio recordings; empty = same as dir
 format = "markdown"       # "markdown" or "json"
 keep_recording = true     # false = auto-delete WAV after transcription
 ```
@@ -265,6 +293,14 @@ prompt = "List each person's update:\n{transcript}"
 ```
 
 Then use with `--template my-standup` or `template = "my-standup"` in config.
+
+### Long meetings
+
+Transcripts that do not fit the model's context window are summarized in overlapping chunks split on
+segment boundaries, and the partial notes are then merged into one summary under the same template —
+custom templates included. Shorter meetings are summarized in a single pass as before. Set
+`context_size` in `[summarization]` if a model's window should not be auto-detected; for the local
+backend it also sets the window the model is loaded with.
 
 ## Speaker Diarization
 

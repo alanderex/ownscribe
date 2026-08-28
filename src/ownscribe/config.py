@@ -14,14 +14,15 @@ DEFAULT_CONFIG_TOML = """\
 [audio]
 backend = "coreaudio"     # "coreaudio" (default) or "sounddevice"
 device = ""               # empty = system audio; or device name/index for sounddevice
-mic = false               # also capture microphone input
+mic = true                # also capture microphone input
 mic_device = ""           # specific mic device name (empty = default)
-capture_mode = "picker"   # "picker" = show source picker; "all" = capture all system audio directly
+capture_mode = "all"      # "all" = capture all system audio directly; "picker" = show source picker
 silence_timeout = 300     # seconds of silence before auto-stop; 0 = disabled
 
 [transcription]
 model = "base"            # whisper model: tiny, base, small, medium, large-v3
 language = ""             # empty = auto-detect
+threads = 0               # CPU threads for transcription; 0 = auto-detect from core count
 # initial_prompt = ""     # prime Whisper with context: domain vocab, speaker names, expected phrases
 # hotwords = ""           # comma-separated words to boost recognition (softer hint than initial_prompt)
 
@@ -40,7 +41,8 @@ model = "phi-4-mini"      # local: "phi-4-mini", path to GGUF, or hf:owner/repo/
 # host = "http://localhost:11434"  # only for ollama/openai backends
 # api_key = ""            # only for openai backend; required by servers like oMLX (or set OPENAI_API_KEY)
 # template = "meeting"    # built-in: "meeting", "lecture", or "brief"
-# context_size = 0        # 0 = auto-detect from model; set manually for OpenAI-compatible backends
+# context_size = 0        # context window in tokens; 0 = auto-detect (8192 for local). Longer
+                          # transcripts are summarized in chunks and merged, whatever the size.
 
 # Custom templates (optional):
 # [templates.my-notes]
@@ -49,6 +51,7 @@ model = "phi-4-mini"      # local: "phi-4-mini", path to GGUF, or hf:owner/repo/
 
 [output]
 dir = "~/ownscribe"       # base output directory
+audio_dir = ""            # directory for audio recordings; empty = same as dir
 format = "markdown"       # "markdown" or "json"
 keep_recording = true     # keep WAV files after transcription; false = auto-delete
 """
@@ -58,9 +61,9 @@ keep_recording = true     # keep WAV files after transcription; false = auto-del
 class AudioConfig:
     backend: str = "coreaudio"
     device: str = ""
-    mic: bool = False
+    mic: bool = True
     mic_device: str = ""
-    capture_mode: str = "picker"  # "picker" = show source picker; "all" = all system audio
+    capture_mode: str = "all"  # "all" = all system audio; "picker" = show source picker
     silence_timeout: int = 300  # seconds of silence before auto-stop; 0 = disabled
 
 
@@ -70,6 +73,7 @@ class TranscriptionConfig:
     language: str = ""
     initial_prompt: str = ""
     hotwords: str = ""
+    threads: int = 0  # CPU threads for transcription; 0 = auto-detect from core count
 
 
 @dataclass
@@ -102,6 +106,7 @@ class TemplateConfig:
 @dataclass
 class OutputConfig:
     dir: str = "~/ownscribe"
+    audio_dir: str = ""
     format: str = "markdown"
     keep_recording: bool = True
 
@@ -109,6 +114,13 @@ class OutputConfig:
     def resolved_dir(self) -> Path:
         return Path(self.dir).expanduser()
 
+    @property
+    def resolved_audio_dir(self) -> Path:
+        return Path(self.audio_dir).expanduser() if self.audio_dir else self.resolved_dir
+
+    @property
+    def uses_separate_audio_dir(self) -> bool:
+        return self.resolved_audio_dir != self.resolved_dir
 
 @dataclass
 class Config:

@@ -66,6 +66,48 @@ def _get_output_dir(config: Config) -> Path:
     return out_dir
 
 
+def _get_output_audio_dir(config: Config, out_dir: Path) -> Path:
+    """Create and return the audio directory for a run, mirroring out_dir's name."""
+    audio_dir = config.output.resolved_audio_dir / out_dir.name
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    return audio_dir
+
+
+def _rename_output_dir(directory: Path, title_slug: str) -> Path:
+    """Append title slug to directory name. Returns the new path, or the original
+    directory if the target already exists with content or the rename fails."""
+    logger = logging.getLogger(__name__)
+    new_dir = directory.parent / f"{directory.name}_{title_slug}"
+    try:
+        if new_dir.exists() and any(new_dir.iterdir()):
+            logger.debug("Not renaming output directory: %s already exists and is not empty", new_dir)
+            return directory
+        directory.rename(new_dir)
+        return new_dir
+    except OSError as e:
+        # Without exc_info: with no logging configured, a traceback lands on stderr
+        # and reads like a crash even though the run itself succeeded.
+        logger.warning("Could not rename output directory to %s: %s", new_dir.name, e)
+        return directory
+
+
+def _unsupported_sounddevice_settings(config: Config) -> list[str]:
+    """Audio settings the sounddevice backend cannot honour.
+
+    It records one input device and cannot mix in system audio, pick a separate
+    mic, or turn the mic off, so these settings would otherwise be accepted and
+    then quietly ignored.
+    """
+    unsupported = []
+    if config.audio.mic_device:
+        unsupported.append("--mic-device")
+    if not config.audio.mic:
+        unsupported.append("--no-mic")
+    if config.audio.capture_mode != "all":
+        unsupported.append(f"capture_mode = {config.audio.capture_mode!r}")
+    return unsupported
+
+
 def _create_recorder(config: Config):
     """Create the appropriate audio recorder based on config."""
     if config.audio.backend == "coreaudio" and not config.audio.device:
@@ -83,6 +125,13 @@ def _create_recorder(config: Config):
 
     from ownscribe.audio.sounddevice_recorder import SoundDeviceRecorder
 
+    if ignored := _unsupported_sounddevice_settings(config):
+        click.echo(
+            f"Warning: the sounddevice backend ignores {', '.join(ignored)}.\n"
+            "It records a single input device; choose which one with --device.",
+            err=True,
+        )
+
     device = config.audio.device or None
     # Try to parse as int (device index)
     if isinstance(device, str) and device.isdigit():
@@ -95,7 +144,14 @@ def _create_transcriber(config: Config, progress=None):
     from ownscribe.transcription.whisperx_transcriber import WhisperXTranscriber
 
     diar_config = config.diarization if config.diarization.enabled else None
-    return WhisperXTranscriber(config.transcription, diar_config, progress=progress)
+    return WhisperXTranscriber(
+        config.transcription,
+        diar_config,
+        progress=progress,
+        # Only the JSON output carries word-level timings; markdown reads
+        # nothing but segment start, text and speaker.
+        need_word_timestamps=config.output.format == "json",
+    )
 
 
 def _download_summarization_model(
@@ -120,9 +176,11 @@ def _download_summarization_model(
 def _format_output(config: Config, transcript_result, summary_text: str | None = None) -> tuple[str, str | None]:
     """Format transcript and optional summary. Returns (transcript_str, summary_str)."""
     if config.output.format == "json":
-        from ownscribe.output.json_output import format_transcript_json
+        from ownscribe.output.json_output import format_summary_json, format_transcript_json
 
-        return format_transcript_json(transcript_result), summary_text
+        tx = format_transcript_json(transcript_result)
+        sm = format_summary_json(summary_text) if summary_text else None
+        return tx, sm
     else:
         from ownscribe.output.markdown import format_summary, format_transcript
 
@@ -154,7 +212,8 @@ def _generate_title_slug(summary: str, summarizer) -> str:
 def run_pipeline(config: Config) -> None:
     """Run the full pipeline: record, transcribe, summarize, output."""
     out_dir = _get_output_dir(config)
-    audio_path = out_dir / "recording.wav"
+    audio_dir = _get_output_audio_dir(config, out_dir)
+    audio_path = audio_dir / "recording.wav"
 
     # 1. Record
     recorder = _create_recorder(config)
@@ -241,11 +300,15 @@ def run_pipeline(config: Config) -> None:
         click.echo("\n\nStopping recording...")
 
     if not audio_path.exists() or audio_path.stat().st_size <= _WAV_HEADER_SIZE:
-        click.echo(
+        message = (
             "Error: No audio was captured. Make sure audio is playing on your system, "
-            "or use --device to capture mic-only.",
-            err=True,
+            "or use --device to capture mic-only."
         )
+        # The mic is captured by default, and the helper stops the whole recording
+        # when it cannot open the microphone (no input device, permission denied).
+        if config.audio.mic:
+            message += "\nIf the microphone is unavailable, use --no-mic to record system audio only."
+        click.echo(message, err=True)
         raise SystemExit(1)
 
     click.echo(f"Audio saved to {audio_path}\n")
@@ -320,10 +383,35 @@ def run_warmup(config: Config) -> None:
         click.echo(f"Summarization model ready: {config.summarization.model}")
 
 
+def _load_transcript_text(transcript_path: Path) -> str:
+    """Read a saved transcript back as the text the summarizer expects.
+
+    transcript.md carries a [MM:SS] stamp on every segment and transcript.json
+    carries every word with timings and scores; neither belongs in an LLM
+    prompt. Parse the file back to a TranscriptResult so the summarizer sees the
+    same normalised, speaker-aware text as the inline path. Falls back to the
+    raw file contents for anything that is not a transcript ownscribe wrote.
+    """
+    raw = transcript_path.read_text()
+
+    if transcript_path.suffix.lower() == ".json":
+        from ownscribe.output.json_output import parse_transcript_json
+
+        result = parse_transcript_json(raw)
+    else:
+        from ownscribe.output.markdown import parse_transcript
+
+        result = parse_transcript(raw)
+
+    if result is None or not result.segments:
+        return raw
+    return result.speaker_text
+
+
 def run_summarize(config: Config, transcript_file: str) -> None:
     """Summarize a transcript file and save the summary alongside the input."""
     transcript_path = Path(transcript_file).resolve()
-    transcript_text = transcript_path.read_text()
+    transcript_text = _load_transcript_text(transcript_path)
 
     try:
         summarizer = create_summarizer(config)
@@ -349,45 +437,56 @@ def run_summarize(config: Config, transcript_file: str) -> None:
     out_dir = transcript_path.parent
     local_sum = config.summarization.backend == "local"
 
-    with PipelineProgress(
-        transcribe=False,
-        diarize=False,
-        summarize=True,
-        download_summarizer=local_sum,
-    ) as progress:
-        progress.begin("summarizing")
-        if local_sum:
-            progress.begin("downloading_model")
-            try:
-                _download_summarization_model(
-                    config.summarization.model,
-                    progress,
-                    "downloading_model",
-                )
-                progress.complete("downloading_model")
-            except Exception:
-                progress.fail("downloading_model")
-                click.echo(
-                    f"Error: Failed to download summarization model '{config.summarization.model}'.\n"
-                    "Check your internet connection and try again.",
-                    err=True,
-                )
-                raise SystemExit(1) from None
-        summary = summarizer.summarize(transcript_text)
-        title_slug = _generate_title_slug(summary, summarizer)
-        progress.complete("summarizing")
+    try:
+        with PipelineProgress(
+            transcribe=False,
+            diarize=False,
+            summarize=True,
+            download_summarizer=local_sum,
+        ) as progress:
+            progress.begin("summarizing")
+            if local_sum:
+                progress.begin("downloading_model")
+                try:
+                    _download_summarization_model(
+                        config.summarization.model,
+                        progress,
+                        "downloading_model",
+                    )
+                    progress.complete("downloading_model")
+                except Exception:
+                    progress.fail("downloading_model")
+                    click.echo(
+                        f"Error: Failed to download summarization model '{config.summarization.model}'.\n"
+                        "Check your internet connection and try again.",
+                        err=True,
+                    )
+                    raise SystemExit(1) from None
+            summary = summarizer.summarize(transcript_text)
+            title_slug = _generate_title_slug(summary, summarizer)
+            progress.complete("summarizing")
+    finally:
+        summarizer.close()
 
     summary_md = format_summary(summary)
     summary_path = out_dir / "summary.md"
     summary_path.write_text(summary_md)
 
     if title_slug:
-        new_dir = out_dir.parent / f"{out_dir.name}_{title_slug}"
-        try:
-            out_dir.rename(new_dir)
-            out_dir = new_dir
-        except Exception:
-            logging.getLogger(__name__).warning("Could not rename output directory", exc_info=True)
+        out_dir, old_out_dir = _rename_output_dir(out_dir, title_slug), out_dir
+        # If a separate audio_dir is configured, rename like out_dir, but only
+        # if audio_dir actually exists -- run_summarize can run on a transcript
+        # regardless of a recording -- and if out_dir was renamed successfully.
+        # Require the transcript to live in the output tree so summarizing a
+        # transcript elsewhere cannot rename an unrelated audio directory whose
+        # name happens to match.
+        if (
+            config.output.uses_separate_audio_dir
+            and old_out_dir.parent == config.output.resolved_dir
+        ):
+            audio_dir = config.output.resolved_audio_dir / old_out_dir.name
+            if audio_dir.is_dir() and out_dir != old_out_dir:
+                _rename_output_dir(audio_dir, title_slug)
 
     summary_path = out_dir / "summary.md"
 
@@ -441,28 +540,31 @@ def _do_transcribe_and_summarize(
             except ImportError as exc:
                 click.echo(f"Error: {exc}", err=True)
                 raise SystemExit(1) from None
-            if not summarizer.is_available():
-                sum_unavailable = True
-            else:
-                try:
-                    progress.begin("summarizing")
-                    if local_sum:
-                        progress.begin("downloading_model")
-                        _download_summarization_model(
-                            config.summarization.model,
-                            progress,
-                            "downloading_model",
-                        )
-                        progress.complete("downloading_model")
-                    summary = summarizer.summarize(result.full_text)
-                    _, summary_str = _format_output(config, result, summary)
-                    summary_path = out_dir / f"summary.{ext}"
-                    summary_path.write_text(summary_str or summary)
-                    title_slug = _generate_title_slug(summary, summarizer)
-                    progress.complete("summarizing")
-                except Exception:
-                    progress.fail("summarizing")
-                    sum_failed = True
+            try:
+                if not summarizer.is_available():
+                    sum_unavailable = True
+                else:
+                    try:
+                        progress.begin("summarizing")
+                        if local_sum:
+                            progress.begin("downloading_model")
+                            _download_summarization_model(
+                                config.summarization.model,
+                                progress,
+                                "downloading_model",
+                            )
+                            progress.complete("downloading_model")
+                        summary = summarizer.summarize(result.speaker_text)
+                        _, summary_str = _format_output(config, result, summary)
+                        summary_path = out_dir / f"summary.{ext}"
+                        summary_path.write_text(summary_str or summary)
+                        title_slug = _generate_title_slug(summary, summarizer)
+                        progress.complete("summarizing")
+                    except Exception:
+                        progress.fail("summarizing")
+                        sum_failed = True
+            finally:
+                summarizer.close()
 
     # --- All user-facing output after TUI exits ---
     click.echo(f"Transcript saved to {transcript_path}")
@@ -491,23 +593,36 @@ def _do_transcribe_and_summarize(
 
     if summary is not None:
         click.echo(f"Summary saved to {out_dir / f'summary.{ext}'}")
-        click.echo(f"\n{summary_str or summary}")
+        # summary.json holds machine-readable JSON; the console still shows the text.
+        displayed = summary if config.output.format == "json" else (summary_str or summary)
+        click.echo(f"\n{displayed}")
         if title_slug:
-            new_dir = out_dir.parent / f"{out_dir.name}_{title_slug}"
-            try:
-                out_dir.rename(new_dir)
-                out_dir = new_dir
-            except Exception:
-                logging.getLogger(__name__).warning("Could not rename output directory", exc_info=True)
+            out_dir, old_out_dir = _rename_output_dir(out_dir, title_slug), out_dir
+            audio_dir = audio_path.parent
+            # If the audio lives in its own directory (separate audio_dir
+            # configured and the recording not colocated with the text output,
+            # as when resuming a directory recorded before audio_dir was set),
+            # rename it like out_dir, but only if out_dir was renamed
+            # successfully.
+            if config.output.uses_separate_audio_dir and audio_dir != old_out_dir:
+                if out_dir != old_out_dir:
+                    audio_dir = _rename_output_dir(audio_dir, title_slug)
+            # Otherwise the audio follows out_dir: adjust audio_dir and
+            # audio_path according to the new name of out_dir.
+            else:
+                audio_dir = out_dir
+            audio_path = audio_dir / audio_path.name
     elif not summarize:
         click.echo(f"\n{transcript_str}")
 
-    # Delete recording if configured — use the (possibly renamed) out_dir
-    if not config.output.keep_recording:
-        actual_audio_path = out_dir / audio_path.name
-        if actual_audio_path.exists():
-            actual_audio_path.unlink()
-            click.echo(f"Recording deleted (keep_recording=false): {actual_audio_path}")
+    # Delete recording if configured — use the (possibly renamed) audio_path
+    if not config.output.keep_recording and audio_path.exists():
+        audio_path.unlink()
+        # Also remove the parent directory if it is now empty, which is expected
+        # when a separate audio_dir is configured.
+        if not any(audio_path.parent.iterdir()):
+            audio_path.parent.rmdir()
+        click.echo(f"Recording deleted (keep_recording=false): {audio_path}")
 
 
 _AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".webm"}
@@ -552,7 +667,14 @@ def run_resume(config: Config, directory: str) -> None:
         click.echo(f"Error: {dir_path} is not a directory.", err=True)
         raise SystemExit(1)
 
+    # First look for an audio file in the target directory, since the user is
+    # explicitly resuming there. If none is found and a separate directory is
+    # configured for audio, search that directory as well.
     audio = _find_audio(dir_path)
+    if audio is None and config.output.uses_separate_audio_dir:
+        candidate = config.output.resolved_audio_dir / dir_path.name
+        if candidate != dir_path and candidate.is_dir():
+            audio = _find_audio(candidate)
     transcript = _find_transcript(dir_path)
     summary = _find_summary(dir_path)
 

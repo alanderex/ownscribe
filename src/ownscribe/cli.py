@@ -40,8 +40,9 @@ def _dir_size(path: str) -> str:
 @click.option("--initial-prompt", default=None, help="Context text to prime Whisper (vocab, speaker names, etc.)")
 @click.option("--hotwords", default=None, help="Comma-separated words to boost Whisper recognition.")
 @click.option(
-    "--mic/--no-mic", "mic", default=None,
-    help="Capture microphone input (mixed with system audio); --no-mic forces system-only.",
+    "--mic/--no-mic",
+    default=None,
+    help="Also capture microphone input (mixed with system audio); on by default.",
 )
 @click.option("--mic-device", default=None, help="Specific mic device name (implies --mic).")
 @click.option(
@@ -107,13 +108,13 @@ def cli(
         config.transcription.initial_prompt = initial_prompt
     if hotwords:
         config.transcription.hotwords = hotwords
+    if mic is False and mic_device:
+        raise click.UsageError("--no-mic and --mic-device cannot be used together.")
+    if mic is not None:
+        config.audio.mic = mic
     if mic_device:
         config.audio.mic = True
         config.audio.mic_device = mic_device
-    elif mic is True:
-        config.audio.mic = True
-    elif mic is False:
-        config.audio.mic = False
     if keep_recording is not None:
         config.output.keep_recording = keep_recording
     if template:
@@ -370,6 +371,7 @@ def cleanup(
     """Remove ownscribe data from disk (config, cache, recordings)."""
     cfg = ctx.obj["config"]
     output_dir = str(cfg.output.resolved_dir)
+    audio_dir = str(cfg.output.resolved_audio_dir)
 
     targets: list[tuple[str, str]] = []
 
@@ -379,6 +381,8 @@ def cleanup(
             ("Cache", _CACHE_DIR),
             ("Output", output_dir),
         ]
+        if audio_dir != output_dir:
+            targets.append(("Audio", audio_dir))
     elif config_ or cache or output:
         if config_:
             targets.append(("Config", _CONFIG_DIR))
@@ -386,13 +390,18 @@ def cleanup(
             targets.append(("Cache", _CACHE_DIR))
         if output:
             targets.append(("Output", output_dir))
+            if audio_dir != output_dir:
+                targets.append(("Audio", audio_dir))
     else:
-        # Interactive: prompt for each directory
-        for label, path in [
+        candidates = [
             ("Config", _CONFIG_DIR),
             ("Cache", _CACHE_DIR),
             ("Output", output_dir),
-        ]:
+        ]
+        if audio_dir != output_dir:
+            candidates.append(("Audio", audio_dir))
+        # Interactive: prompt for each directory
+        for label, path in candidates:
             size = _dir_size(path)
             if size == "(not found)":
                 click.echo(f"  {label}: {path} — {size}, skipping")

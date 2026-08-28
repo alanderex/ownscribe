@@ -21,8 +21,6 @@ from ownscribe.summarization.prompts import (
     SEARCH_FIND_SYSTEM,
 )
 
-_DEFAULT_CONTEXT_SIZE = 8192
-
 _SEARCH_RESULTS_SCHEMA = {
     "name": "search_results",
     "strict": True,
@@ -63,59 +61,38 @@ def ask(config: Config, question: str, since: str | None, limit: int | None) -> 
     except ImportError as exc:
         click.echo(f"Error: {exc}", err=True)
         return
-    if not summarizer.is_available():
-        click.echo("Summarization backend is not reachable. Check your configuration.")
-        return
+    with summarizer:
+        if not summarizer.is_available():
+            click.echo("Summarization backend is not reachable. Check your configuration.")
+            return
 
-    context_size = _resolve_context_size(config)
+        context_size = summarizer.context_size
 
-    # Stage 1
-    label = f"Searching {len(meetings)} meetings"
-    with Spinner(label) as spinner:
-        relevant = _find_relevant_meetings(
-            summarizer, question, meetings, context_size, spinner=spinner,
-        )
-        spinner.update(label)  # restore label so exit message is clean
+        # Stage 1
+        label = f"Searching {len(meetings)} meetings"
+        with Spinner(label) as spinner:
+            relevant = _find_relevant_meetings(
+                summarizer, question, meetings, context_size, spinner=spinner,
+            )
+            spinner.update(label)  # restore label so exit message is clean
 
-    if not relevant:
-        click.echo("No relevant meetings found for your question.")
-        return
+        if not relevant:
+            click.echo("No relevant meetings found for your question.")
+            return
 
-    click.echo(f"Found {len(relevant)} relevant meetings:")
-    for m in relevant:
-        click.echo(f"  - {m.display_name}")
+        click.echo(f"Found {len(relevant)} relevant meetings:")
+        for m in relevant:
+            click.echo(f"  - {m.display_name}")
 
-    # Stage 2
-    with Spinner("Analyzing transcripts"):
-        answer, skipped_transcripts = _answer_from_transcripts(summarizer, question, relevant, context_size)
-        answer = _verify_quotes(answer, _load_transcripts(relevant))
+        # Stage 2
+        with Spinner("Analyzing transcripts"):
+            answer, skipped_transcripts = _answer_from_transcripts(summarizer, question, relevant, context_size)
+            answer = _verify_quotes(answer, _load_transcripts(relevant))
 
-    if skipped_transcripts:
-        click.echo(f"({skipped_transcripts} transcripts did not fit within context budget, they were skipped)")
+        if skipped_transcripts:
+            click.echo(f"({skipped_transcripts} transcripts did not fit within context budget, they were skipped)")
 
-    click.echo(answer)
-
-
-
-def _resolve_context_size(config: Config) -> int:
-    if config.summarization.context_size > 0:
-        return config.summarization.context_size
-
-    if config.summarization.backend == "ollama":
-        try:
-            import ollama
-
-            client = ollama.Client(host=config.summarization.host)
-            info = client.show(config.summarization.model)
-            # Ollama returns model info with context window details
-            model_info = info.get("model_info", {})
-            for key, value in model_info.items():
-                if "context_length" in key:
-                    return int(value)
-        except Exception:
-            pass
-
-    return _DEFAULT_CONTEXT_SIZE
+        click.echo(answer)
 
 
 # -- Discovery --
@@ -199,18 +176,11 @@ def _discover_meetings(
     return meetings, skipped
 
 
-# -- Token estimation --
-
-
-def _estimate_tokens(text: str) -> int:
-    return len(text) // 4
-
-
 # -- Chunking --
 
 
 def _build_summary_chunks(
-    meetings: list[Meeting], context_budget: int,
+    summarizer: Summarizer, meetings: list[Meeting], context_budget: int,
 ) -> list[list[Meeting]]:
     effective = int(context_budget * 0.8)
     overhead = 1000  # system prompt + question + response headroom
@@ -223,7 +193,7 @@ def _build_summary_chunks(
     for m in meetings:
         summary_text = m.summary_path.read_text()
         header = f"## [{m.folder_name}]\n"
-        entry_tokens = _estimate_tokens(header + summary_text)
+        entry_tokens = summarizer.count_tokens(header + summary_text)
 
         if current_chunk and current_size + entry_tokens > budget:
             chunks.append(current_chunk)
@@ -341,7 +311,7 @@ def _find_relevant_meetings(
     context_size: int,
     spinner: Spinner | None = None,
 ) -> list[Meeting]:
-    chunks = _build_summary_chunks(meetings, context_size)
+    chunks = _build_summary_chunks(summarizer, meetings, context_size)
     all_relevant_ids: set[str] = set()
     total_chunks = len(chunks)
 
@@ -442,7 +412,7 @@ def _answer_from_transcripts(
 
         text = m.transcript_path.read_text()
         entry = f"## [{m.folder_name}] {m.display_name}\n{text}"
-        entry_tokens = _estimate_tokens(entry)
+        entry_tokens = summarizer.count_tokens(entry)
 
         if used_tokens + entry_tokens > budget:
             skipped += 1

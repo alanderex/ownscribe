@@ -29,9 +29,12 @@ class TestDefaults:
 
     def test_default_mic_settings(self):
         cfg = Config()
-        assert cfg.audio.mic is False
+        assert cfg.audio.mic is True
         assert cfg.audio.mic_device == ""
 
+    def test_default_capture_mode(self):
+        cfg = Config()
+        assert cfg.audio.capture_mode == "all"
 
     def test_default_diarization_telemetry_off(self):
         cfg = Config()
@@ -195,3 +198,20 @@ class TestResolvedDir:
     def test_absolute_path_unchanged(self):
         cfg = OutputConfig(dir="/tmp/notes")
         assert cfg.resolved_dir == Path("/tmp/notes")
+
+
+class TestResolvedAudioDir:
+    def test_expands_tilde(self):
+        cfg = OutputConfig(dir="/tmp/notes", audio_dir="~/audio-cache")
+        resolved = cfg.resolved_audio_dir
+        assert "~" not in str(resolved)
+        assert str(resolved).endswith("audio-cache")
+
+    def test_absolute_path_unchanged(self):
+        cfg = OutputConfig(dir="/tmp/notes", audio_dir="/tmp/audio-cache")
+        assert cfg.resolved_audio_dir == Path("/tmp/audio-cache")
+        assert cfg.resolved_audio_dir != cfg.resolved_dir
+
+    def test_falls_back_to_dir_when_empty(self):
+        cfg = OutputConfig(dir="/tmp/notes", audio_dir="")
+        assert cfg.resolved_audio_dir == cfg.resolved_dir

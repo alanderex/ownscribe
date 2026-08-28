@@ -29,6 +29,9 @@ _BINARY_CANDIDATES = [
 _CACHE_DIR = Path.home() / ".local" / "share" / "ownscribe" / "bin"
 _DOWNLOAD_URL = "https://github.com/paberr/ownscribe/releases/latest/download/ownscribe-audio-{arch}"
 
+# Releases only ever publish ownscribe-audio-arm64.
+_SUPPORTED_ARCH = "arm64"
+
 
 def _download_binary() -> Path | None:
     """Download the prebuilt ownscribe-audio binary from GitHub Releases."""
@@ -36,7 +39,16 @@ def _download_binary() -> Path | None:
         return None
 
     arch = platform.machine()
-    if arch not in ("arm64", "x86_64"):
+    if arch != _SUPPORTED_ARCH:
+        # Say so rather than 404ing on a URL that cannot exist and degrading to
+        # mic-only capture with no explanation.
+        click.echo(
+            f"System audio capture needs an Apple Silicon Mac; this one reports '{arch}'.\n"
+            "No ownscribe-audio binary is published for it, so recording falls back to "
+            "the microphone via sounddevice.\n"
+            "To capture system audio anyway, build the helper from source: bash swift/build.sh",
+            err=True,
+        )
         return None
 
     url = _DOWNLOAD_URL.format(arch=arch)
@@ -102,10 +114,12 @@ class CoreAudioRecorder(AudioRecorder):
         cmd = [str(self._binary), "capture", "--output", str(output_path)]
         if self._capture_mode == "all":
             cmd.append("--capture-mode-all")
-        if self._mic or self._mic_device:
+        # A configured mic_device must not re-enable a mic that was turned off,
+        # e.g. via --no-mic or mic = false in config.toml.
+        if self._mic:
             cmd.append("--mic")
-        if self._mic_device:
-            cmd.extend(["--mic-device", self._mic_device])
+            if self._mic_device:
+                cmd.extend(["--mic-device", self._mic_device])
         if self._silence_timeout > 0:
             cmd.extend(["--silence-timeout", str(self._silence_timeout)])
 
