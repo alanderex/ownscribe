@@ -59,9 +59,14 @@ def _dir_size(path: str) -> str:
     "--speakers", default=None, type=click.IntRange(min=1),
     help="Exact number of speakers for diarization (sets min and max).",
 )
+@click.option(
+    "--title", default=None,
+    help="Name this meeting; the output folder becomes YYMMDD-your-title.",
+)
 @click.pass_context
 def cli(
     ctx: click.Context,
+    title: str | None,
     device: str | None,
     no_summarize: bool,
     diarize: bool,
@@ -129,7 +134,8 @@ def cli(
 
     if ctx.invoked_subcommand is None:
         from ownscribe.pipeline import run_pipeline
-        run_pipeline(config)
+        # Per-run, not config: a title belongs to one meeting, never persisted.
+        run_pipeline(config, title=title)
 
 
 @cli.command()

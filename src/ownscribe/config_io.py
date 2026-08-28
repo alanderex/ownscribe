@@ -52,9 +52,15 @@ def config_to_dict(config: Config, *, reveal_secrets: bool = False) -> dict:
     """
     data = dataclasses.asdict(config)
     if not reveal_secrets:
+        # Report which secrets exist without revealing them. Blanking alone makes a
+        # saved token indistinguishable from no token, so a UI cannot confirm a save
+        # and its field just goes empty again — which reads as "it didn't work".
+        present = {}
         for section, key in _SECRET_FIELDS:
+            present[f"{section}.{key}"] = bool(data.get(section, {}).get(key))
             if data.get(section, {}).get(key):
                 data[section][key] = ""
+        data["secrets_set"] = present
     return data
 
 

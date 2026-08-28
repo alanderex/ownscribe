@@ -58,11 +58,54 @@ def _check_audio_silence(audio_path: Path) -> None:
         raise SystemExit(1)
 
 
-def _get_output_dir(config: Config) -> Path:
-    """Create and return a timestamped output directory."""
+# A run directory created by this version: YYMMDD-HHMM. Directories created before
+# the rename to this scheme (YYYY-MM-DD_HHMM[_slug]) do not match, which is how
+# _rename_output_dir knows to leave their format alone.
+_RUN_DIR_RE = re.compile(r"^(\d{6})-(\d{4})$")
+
+
+def _titled_names(date_part: str, time_part: str, title_slug: str) -> list[str]:
+    """Candidate directory names for a titled run, best first.
+
+    The time is dropped when a title is available — `260827-q2-sales-review` reads
+    better than `260827-1400-q2-sales-review` — and only reappears to break a
+    collision, e.g. a standup recorded twice in one day.
+    """
+    return [f"{date_part}-{title_slug}", f"{date_part}-{title_slug}-{time_part}"]
+
+
+def _claim_dir(base: Path, names: list[str]) -> Path | None:
+    """Create the first of `names` that isn't already taken. None if all are."""
+    for name in names:
+        candidate = base / name
+        try:
+            candidate.mkdir(parents=True, exist_ok=False)
+            return candidate
+        except FileExistsError:
+            continue
+    return None
+
+
+def _get_output_dir(config: Config, title: str | None = None) -> Path:
+    """Create and return the output directory for a run.
+
+    With a title: `YYMMDD-title-slug`. Without: `YYMMDD-HHMM`, which a generated
+    title may later replace via _rename_output_dir.
+    """
     base = config.output.resolved_dir
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
-    out_dir = base / timestamp
+    now = datetime.now()
+    date_part = now.strftime("%y%m%d")
+    time_part = now.strftime("%H%M")
+
+    if title and (slug := _slugify(title)):
+        claimed = _claim_dir(base, _titled_names(date_part, time_part, slug))
+        if claimed is not None:
+            return claimed
+        # Both the titled name and the time-suffixed variant are taken (same title,
+        # same minute). Fall through to the plain timestamp rather than reusing a
+        # directory that already holds another meeting.
+
+    out_dir = base / f"{date_part}-{time_part}"
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
 
@@ -74,22 +117,43 @@ def _get_output_audio_dir(config: Config, out_dir: Path) -> Path:
     return audio_dir
 
 
-def _rename_output_dir(directory: Path, title_slug: str) -> Path:
-    """Append title slug to directory name. Returns the new path, or the original
-    directory if the target already exists with content or the rename fails."""
+def _rename_output_dir(directory: Path, title_slug: str, *, force_name: str | None = None) -> Path:
+    """Name a run directory after its title. Returns the new path, or the original
+    directory if every candidate name is taken or the rename fails.
+
+    `force_name` renames to exactly that name, used to keep a separate audio
+    directory in step with the output directory: recomputing the name there could
+    pick a different collision suffix and silently desync the pair.
+    """
     logger = logging.getLogger(__name__)
-    new_dir = directory.parent / f"{directory.name}_{title_slug}"
-    try:
-        if new_dir.exists() and any(new_dir.iterdir()):
-            logger.debug("Not renaming output directory: %s already exists and is not empty", new_dir)
+
+    if force_name is not None:
+        candidates = [force_name]
+    elif m := _RUN_DIR_RE.match(directory.name):
+        candidates = _titled_names(*m.groups(), title_slug)
+    else:
+        # Pre-YYMMDD layout (or an already-titled directory): keep the old
+        # append-a-suffix behaviour rather than reformatting someone's existing folder.
+        candidates = [f"{directory.name}_{title_slug}"]
+
+    for name in candidates:
+        new_dir = directory.parent / name
+        if new_dir == directory:
             return directory
-        directory.rename(new_dir)
-        return new_dir
-    except OSError as e:
-        # Without exc_info: with no logging configured, a traceback lands on stderr
-        # and reads like a crash even though the run itself succeeded.
-        logger.warning("Could not rename output directory to %s: %s", new_dir.name, e)
-        return directory
+        try:
+            # An empty directory is a leftover from an abandoned run; renaming onto it
+            # is safe and avoids littering. Only real content blocks the name.
+            if new_dir.exists() and any(new_dir.iterdir()):
+                logger.debug("Not renaming output directory: %s already exists", new_dir)
+                continue
+            directory.rename(new_dir)
+            return new_dir
+        except OSError as e:
+            # Without exc_info: with no logging configured, a traceback lands on stderr
+            # and reads like a crash even though the run itself succeeded.
+            logger.warning("Could not rename output directory to %s: %s", new_dir.name, e)
+            return directory
+    return directory
 
 
 def _unsupported_sounddevice_settings(config: Config) -> list[str]:
@@ -210,9 +274,9 @@ def _generate_title_slug(summary: str, summarizer) -> str:
         return ""
 
 
-def run_pipeline(config: Config) -> None:
+def run_pipeline(config: Config, title: str | None = None) -> None:
     """Run the full pipeline: record, transcribe, summarize, output."""
-    out_dir = _get_output_dir(config)
+    out_dir = _get_output_dir(config, title)
     audio_dir = _get_output_audio_dir(config, out_dir)
     audio_path = audio_dir / "recording.wav"
 
@@ -498,7 +562,7 @@ def run_summarize(config: Config, transcript_file: str) -> None:
         ):
             audio_dir = config.output.resolved_audio_dir / old_out_dir.name
             if audio_dir.is_dir() and out_dir != old_out_dir:
-                _rename_output_dir(audio_dir, title_slug)
+                _rename_output_dir(audio_dir, title_slug, force_name=out_dir.name)
 
     summary_path = out_dir / "summary.md"
 
@@ -618,7 +682,9 @@ def _do_transcribe_and_summarize(
             # successfully.
             if config.output.uses_separate_audio_dir and audio_dir != old_out_dir:
                 if out_dir != old_out_dir:
-                    audio_dir = _rename_output_dir(audio_dir, title_slug)
+                    audio_dir = _rename_output_dir(
+                        audio_dir, title_slug, force_name=out_dir.name
+                    )
             # Otherwise the audio follows out_dir: adjust audio_dir and
             # audio_path according to the new name of out_dir.
             else:

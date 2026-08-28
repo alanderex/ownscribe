@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import re
 from unittest import mock
 
 from ownscribe.config import Config
@@ -1126,3 +1127,144 @@ class TestResume:
         with mock.patch("ownscribe.pipeline.run_summarize") as mock_sum:
             run_resume(config, str(tmp_path))
             mock_sum.assert_called_once_with(config, str(tmp_path / "transcript.json"))
+
+
+class TestRunDirectoryNaming:
+    """Run folders are YYMMDD-HHMM, or YYMMDD-{title} when a title is known."""
+
+    @staticmethod
+    def _config(tmp_path):
+        from ownscribe.config import Config
+
+        cfg = Config()
+        cfg.output.dir = str(tmp_path)
+        return cfg
+
+    def test_untitled_run_uses_date_and_time(self, tmp_path):
+        from ownscribe.pipeline import _get_output_dir
+
+        out = _get_output_dir(self._config(tmp_path))
+
+        assert re.fullmatch(r"\d{6}-\d{4}", out.name), out.name
+
+    def test_title_replaces_the_time(self, tmp_path):
+        from ownscribe.pipeline import _get_output_dir
+
+        out = _get_output_dir(self._config(tmp_path), "Q2 Sales Review")
+
+        assert re.fullmatch(r"\d{6}-q2-sales-review", out.name), out.name
+
+    def test_same_title_same_day_does_not_collide(self, tmp_path):
+        """A standup recorded twice in one day must not reuse the first folder."""
+        from ownscribe.pipeline import _get_output_dir
+
+        cfg = self._config(tmp_path)
+        first = _get_output_dir(cfg, "Standup")
+        (first / "transcript.md").write_text("first meeting")
+        second = _get_output_dir(cfg, "Standup")
+
+        assert first != second
+        # the first one keeps the clean name and its content
+        assert (first / "transcript.md").read_text() == "first meeting"
+        assert second.name.startswith(first.name)
+
+    def test_blank_or_punctuation_only_title_falls_back_to_time(self, tmp_path):
+        from ownscribe.pipeline import _get_output_dir
+
+        for title in ("", "   ", "!!!"):
+            out = _get_output_dir(self._config(tmp_path), title)
+            assert re.fullmatch(r"\d{6}-\d{4}", out.name), (title, out.name)
+
+    def test_generated_title_replaces_the_time_on_rename(self, tmp_path):
+        from ownscribe.pipeline import _rename_output_dir
+
+        d = tmp_path / "260827-1400"
+        d.mkdir()
+
+        renamed = _rename_output_dir(d, "q2-sales-review")
+
+        assert renamed.name == "260827-q2-sales-review"
+        assert not d.exists()
+
+    def test_rename_collision_keeps_the_time(self, tmp_path):
+        from ownscribe.pipeline import _rename_output_dir
+
+        occupied = tmp_path / "260827-standup"
+        occupied.mkdir()
+        (occupied / "transcript.md").write_text("the earlier standup")
+        d = tmp_path / "260827-1630"
+        d.mkdir()
+
+        renamed = _rename_output_dir(d, "standup")
+
+        assert renamed.name == "260827-standup-1630"
+        # an *empty* leftover, by contrast, is fine to reuse
+        assert (occupied / "transcript.md").read_text() == "the earlier standup"
+
+    def test_legacy_directories_keep_their_format(self, tmp_path):
+        """Folders from before this scheme must not be reformatted under the user."""
+        from ownscribe.pipeline import _rename_output_dir
+
+        d = tmp_path / "2026-08-27_1400"
+        d.mkdir()
+
+        renamed = _rename_output_dir(d, "q2-sales-review")
+
+        assert renamed.name == "2026-08-27_1400_q2-sales-review"
+
+    def test_force_name_keeps_a_separate_audio_dir_in_step(self, tmp_path):
+        """Recomputing the name could pick a different collision suffix and desync."""
+        from ownscribe.pipeline import _rename_output_dir
+
+        audio = tmp_path / "260827-1630"
+        audio.mkdir()
+        (tmp_path / "260827-standup").mkdir()  # would push a recompute to the -1630 variant
+
+        renamed = _rename_output_dir(audio, "standup", force_name="260827-standup-9999")
+
+        assert renamed.name == "260827-standup-9999"
+
+    def test_rename_never_destroys_an_existing_directory(self, tmp_path):
+        from ownscribe.pipeline import _rename_output_dir
+
+        for name in ("260827-standup", "260827-standup-1630"):
+            occupied = tmp_path / name
+            occupied.mkdir()
+            (occupied / "keep.md").write_text(name)
+        d = tmp_path / "260827-1630"
+        d.mkdir()
+
+        renamed = _rename_output_dir(d, "standup")
+
+        assert renamed == d  # gave up rather than clobber
+        for name in ("260827-standup", "260827-standup-1630"):
+            assert (tmp_path / name / "keep.md").read_text() == name
+
+
+class TestSecretPresenceReporting:
+    """`config get` blanks secrets; a UI still needs to know one is stored."""
+
+    def test_reports_which_secrets_are_set_without_revealing_them(self):
+        from ownscribe.config import Config
+        from ownscribe.config_io import config_to_dict
+
+        cfg = Config()
+        cfg.diarization.hf_token = "hf_realsecret"
+
+        data = config_to_dict(cfg)
+
+        assert data["diarization"]["hf_token"] == ""
+        assert data["secrets_set"]["diarization.hf_token"] is True
+        assert data["secrets_set"]["summarization.api_key"] is False
+        assert "hf_realsecret" not in json.dumps(data)
+
+    def test_reveal_secrets_still_returns_the_value(self):
+        from ownscribe.config import Config
+        from ownscribe.config_io import config_to_dict
+
+        cfg = Config()
+        cfg.diarization.hf_token = "hf_realsecret"
+
+        data = config_to_dict(cfg, reveal_secrets=True)
+
+        assert data["diarization"]["hf_token"] == "hf_realsecret"
