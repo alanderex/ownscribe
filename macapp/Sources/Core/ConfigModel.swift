@@ -8,7 +8,11 @@ struct OwnscribeConfig: Codable, Equatable {
     /// `config get` blanks secret values, so this is the only way to tell a saved
     /// token from no token — without it a saved field just reads back empty and
     /// looks like the save failed.
-    var secretsSet: [String: Bool] = [:]
+    ///
+    /// Optional on purpose: Swift's synthesized Decodable ignores property defaults
+    /// for missing keys and throws instead, so a non-optional here would hard-fail
+    /// the whole app against any ownscribe predating this field.
+    var secretsSet: [String: Bool]?
     var audio = Audio()
     var transcription = Transcription()
     var diarization = Diarization()

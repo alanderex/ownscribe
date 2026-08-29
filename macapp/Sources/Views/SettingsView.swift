@@ -224,7 +224,7 @@ private struct ConfigTextField: View {
 
     /// True when a value for this secret is stored. `config get` blanks the value
     /// itself, so presence is reported separately.
-    private var secretIsSet: Bool { app.config.secretsSet[key] == true }
+    private var secretIsSet: Bool { app.config.secretsSet?[key] == true }
 
     private var effectiveHelp: String? {
         // Secrets come back redacted (blank), so say whether one is stored — otherwise

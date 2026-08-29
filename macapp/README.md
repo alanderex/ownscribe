@@ -36,12 +36,15 @@ The separate bundle id matters because macOS keys Screen Recording and Microphon
 grants off it — two bundles sharing an id fight over the same TCC record. The
 separate managed env matters because the variant installs its own ownscribe;
 sharing one would upgrade the stable app's environment too, so a bad CLI change
-would break the very build being kept as a fallback. The cost is a second copy of
-torch/whisperx, roughly 1-2 GB.
+would break the very build being kept as a fallback.
 
-Both read the same `~/.config/ownscribe/config.toml` and write to the same output
-folder, so recordings and settings are shared. Only the code and the Python
-environment are separate.
+**Models are not downloaded again.** Nothing model-related lives in the venv:
+Whisper, the alignment models, pyannote and the summarization GGUF all resolve
+through the HuggingFace cache (`~/.cache/huggingface`), the audio helper lives in
+`~/.local/share/ownscribe/bin`, and config and recordings are shared. Only Python
+packages are per-environment, and `uv` hardlinks those from its own cache
+(`~/.cache/uv`) when the venv is on the same filesystem, so a second environment
+costs far less disk than a full copy of torch.
 
 To promote a variant to stable: rebuild without `--variant`, and delete
 `~/Library/Application Support/Ownscribe Next` when you no longer need it.
