@@ -11,12 +11,20 @@ enum CLIError: Error {
 /// speaker naming) goes through that CLI, so `~/.config/ownscribe/config.toml` stays the
 /// single source of truth.
 final class OwnscribeCLI {
-    /// ~/Library/Application Support/Ownscribe
+    /// ~/Library/Application Support/<name>, where <name> comes from the bundle's
+    /// `OWSManagedRootName` key and defaults to "Ownscribe".
+    ///
+    /// A side-by-side build (build-app.sh --variant) sets a different name so it gets
+    /// its own virtual environment. Without that, a variant would share — and upgrade —
+    /// the stable app's env, so a bad CLI change would take out the very build being
+    /// kept as a fallback.
     static var managedRoot: URL {
         let base = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        return base.appendingPathComponent("Ownscribe", isDirectory: true)
+        let name = (Bundle.main.object(forInfoDictionaryKey: "OWSManagedRootName") as? String)
+            .flatMap { $0.isEmpty ? nil : $0 } ?? "Ownscribe"
+        return base.appendingPathComponent(name, isDirectory: true)
     }
 
     private var venvDir: URL { Self.managedRoot.appendingPathComponent(".venv", isDirectory: true) }
@@ -37,7 +45,7 @@ final class OwnscribeCLI {
     /// To cut a release: `git tag macapp-vX.Y.Z && git push origin macapp-vX.Y.Z`,
     /// then bump the ref below in the same commit that bumps CFBundleShortVersionString
     /// in build-app.sh.
-    private static let macappRelease = "macapp-v0.15.0"
+    private static let macappRelease = "macapp-v0.15.1"
 
     private static let pipSpec =
         "ownscribe[all] @ git+https://github.com/alanderex/ownscribe@\(macappRelease)"

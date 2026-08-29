@@ -13,6 +13,39 @@ single source of truth and the app never reimplements pipeline logic.
 - A from-source ownscribe install in the repo (`uv sync` at the repo root, so
   `.venv/bin/ownscribe` exists).
 
+## Side-by-side builds (keeping a fallback)
+
+`build-app.sh --variant NAME` builds a second app that coexists with the installed
+one, so a known-good build can be kept while a new one is tried:
+
+```bash
+bash macapp/build-app.sh --variant Next     # -> build/Ownscribe Next.app
+bash macapp/build-app.sh                    # -> build/Ownscribe.app (stable)
+```
+
+Three things differ, and all three are needed for the two to be genuinely
+independent:
+
+| | stable | `--variant Next` |
+|---|---|---|
+| app | `Ownscribe.app` | `Ownscribe Next.app` |
+| bundle id | `dev.p4l.ownscribe.menubar` | `dev.p4l.ownscribe.menubar.next` |
+| managed env | `~/Library/Application Support/Ownscribe` | `~/Library/Application Support/Ownscribe Next` |
+
+The separate bundle id matters because macOS keys Screen Recording and Microphone
+grants off it — two bundles sharing an id fight over the same TCC record. The
+separate managed env matters because the variant installs its own ownscribe;
+sharing one would upgrade the stable app's environment too, so a bad CLI change
+would break the very build being kept as a fallback. The cost is a second copy of
+torch/whisperx, roughly 1-2 GB.
+
+Both read the same `~/.config/ownscribe/config.toml` and write to the same output
+folder, so recordings and settings are shared. Only the code and the Python
+environment are separate.
+
+To promote a variant to stable: rebuild without `--variant`, and delete
+`~/Library/Application Support/Ownscribe Next` when you no longer need it.
+
 ## Build & run
 
 Two options — both produce the same app.
