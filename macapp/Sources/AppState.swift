@@ -182,7 +182,15 @@ final class AppState: ObservableObject {
         guard cli.isInstalled else { Task { await install() }; return }
         cancelled = false
         Task {
-            await Permissions.prime(mic: captureMic)
+            // Refuse to start without Screen Recording rather than recording silence:
+            // ScreenCaptureKit fails with -3801 and the user finds out minutes later
+            // via an empty transcript. The first request also always returns false —
+            // macOS only applies a fresh grant after a relaunch — so say so plainly.
+            let granted = await Permissions.prime(mic: captureMic)
+            guard granted else {
+                phase = .failed(Self.screenRecordingMessage)
+                return
+            }
             beginRecording()
         }
     }
@@ -415,6 +423,23 @@ final class AppState: ObservableObject {
     private static func isProgressEventLine(_ line: String) -> Bool {
         line.hasPrefix("{") && line.contains("\"ownscribe_progress\"")
     }
+
+    static let screenRecordingMessage = """
+        Ownscribe needs Screen Recording permission to capture system audio.
+
+        Enable it for this app in System Settings › Privacy & Security › \
+        Screen Recording, then quit and reopen Ownscribe — macOS only applies a \
+        new grant after a relaunch.
+        """
+
+    /// True when the failure the user is looking at is the missing Screen Recording
+    /// grant, so the UI can offer to open the right settings pane.
+    var isScreenRecordingFailure: Bool {
+        if case .failed(let message) = phase { return message == Self.screenRecordingMessage }
+        return false
+    }
+
+    func openScreenRecordingSettings() { Permissions.openScreenRecordingSettings() }
 
     static func formatElapsed(_ seconds: TimeInterval) -> String {
         let total = Int(seconds)

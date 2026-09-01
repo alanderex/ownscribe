@@ -119,16 +119,28 @@ private struct FailedView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Something went wrong", systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .font(.headline)
+            Label(
+                app.isScreenRecordingFailure ? "Permission needed" : "Something went wrong",
+                systemImage: app.isScreenRecordingFailure
+                    ? "lock.shield" : "exclamationmark.triangle.fill"
+            )
+            .foregroundStyle(.orange)
+            .font(.headline)
             Text(message)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Back") { app.backToIdle() }
-                .buttonStyle(.bordered)
+            HStack {
+                // The pane is several levels deep in System Settings and the app
+                // cannot grant this itself, so offer the shortcut rather than prose.
+                if app.isScreenRecordingFailure {
+                    Button("Open Settings") { app.openScreenRecordingSettings() }
+                        .buttonStyle(.borderedProminent)
+                }
+                Button("Back") { app.backToIdle() }
+                    .buttonStyle(.bordered)
+            }
         }
     }
 }
