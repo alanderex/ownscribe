@@ -390,10 +390,30 @@ final class AppState: ObservableObject {
         NSPasteboard.general.setString(summaryText, forType: .string)
     }
 
+    /// Pick the line most likely to explain a failure out of captured stderr.
+    ///
+    /// Progress events share stderr with diagnostics, so they must be dropped here or
+    /// the user is shown `{"ownscribe_progress":1,...}` instead of the error — the
+    /// first line of a failing run is now always an event.
+    ///
+    /// For a Python traceback the useful line is the last one (the exception), not the
+    /// first (`Traceback (most recent call last):`), so that case is handled explicitly.
     static func firstMeaningfulLine(_ text: String) -> String? {
-        text.components(separatedBy: "\n")
+        let lines = text.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
-            .first { !$0.isEmpty }
+            .filter { !$0.isEmpty && !isProgressEventLine($0) }
+
+        guard !lines.isEmpty else { return nil }
+        if lines.contains(where: { $0.hasPrefix("Traceback (most recent call last)") }) {
+            // The exception type and message are on the final line of a traceback.
+            return lines.last
+        }
+        return lines.first
+    }
+
+    /// Cheap discriminator check — avoids a full JSON decode per stderr line.
+    private static func isProgressEventLine(_ line: String) -> Bool {
+        line.hasPrefix("{") && line.contains("\"ownscribe_progress\"")
     }
 
     static func formatElapsed(_ seconds: TimeInterval) -> String {
