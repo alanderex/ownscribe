@@ -1388,3 +1388,28 @@ class TestConfigCoercion:
         assert cfg.audio.silence_timeout == 60
         assert cfg.output.format == "json"
         assert cfg.summarization.backend == "ollama"
+
+
+class TestSecondsDisambiguatedDirectories:
+    """A run directory that fell back to HHMMSS must still be renameable."""
+
+    def test_a_generated_title_can_rename_it(self, tmp_path):
+        from ownscribe.pipeline import _rename_output_dir
+
+        d = tmp_path / "260902-140233"
+        d.mkdir()
+
+        renamed = _rename_output_dir(d, "q2-sales-review")
+
+        assert renamed.name == "260902-q2-sales-review"
+
+    def test_its_collision_suffix_uses_the_minute(self, tmp_path):
+        from ownscribe.pipeline import _rename_output_dir
+
+        occupied = tmp_path / "260902-standup"
+        occupied.mkdir()
+        (occupied / "t.md").write_text("earlier")
+        d = tmp_path / "260902-140233"
+        d.mkdir()
+
+        assert _rename_output_dir(d, "standup").name == "260902-standup_1402"

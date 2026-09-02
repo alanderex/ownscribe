@@ -58,10 +58,12 @@ def _check_audio_silence(audio_path: Path) -> None:
         raise SystemExit(1)
 
 
-# A run directory created by this version: YYMMDD-HHMM. Directories created before
-# the rename to this scheme (YYYY-MM-DD_HHMM[_slug]) do not match, which is how
-# _rename_output_dir knows to leave their format alone.
-_RUN_DIR_RE = re.compile(r"^(\d{6})-(\d{4})$")
+# A run directory created by this version: YYMMDD-HHMM, or YYMMDD-HHMMSS when a
+# second run claimed the same minute. Directories from before this scheme
+# (YYYY-MM-DD_HHMM[_slug]) do not match, which is how _rename_output_dir knows to
+# leave their format alone. Without the optional seconds a disambiguated directory
+# matched nothing, so a generated title could never rename it.
+_RUN_DIR_RE = re.compile(r"^(\d{6})-(\d{4})\d{0,2}$")
 
 
 def _titled_names(date_part: str, time_part: str, title_slug: str) -> list[str]:

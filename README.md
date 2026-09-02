@@ -84,6 +84,12 @@ Works with any app that outputs audio through Core Audio (Zoom, Teams, Meet, etc
 > ```
 > Recording fails to start while the microphone is unavailable — use `--no-mic` to capture system audio only.
 
+## Menu-bar app (macOS)
+
+A native SwiftUI menu-bar app lives in [`macapp/`](macapp/README.md). It drives
+this CLI as a subprocess — config, recordings and output are shared — and renders
+live pipeline progress. See `macapp/README.md` for building it.
+
 ## Installation
 
 ### Quick start with uvx

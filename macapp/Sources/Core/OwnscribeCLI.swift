@@ -45,7 +45,12 @@ final class OwnscribeCLI {
     /// To cut a release: `git tag macapp-vX.Y.Z && git push origin macapp-vX.Y.Z`,
     /// then bump the ref below in the same commit that bumps CFBundleShortVersionString
     /// in build-app.sh.
-    static let macappRelease = "macapp-v0.15.1"
+    ///
+    /// Never move an existing tag. needsUpgrade compares this string against the one
+    /// recorded beside the installed venv, so a moved tag leaves every existing
+    /// install on the CLI it already had while claiming to be current. v0.15.1 was
+    /// moved several times during development; v0.15.2 is the first immutable one.
+    static let macappRelease = "macapp-v0.15.2"
 
     private static let pipSpec =
         "ownscribe[all] @ git+https://github.com/alanderex/ownscribe@\(macappRelease)"

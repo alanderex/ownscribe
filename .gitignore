@@ -34,3 +34,6 @@ swift/.build/
 
 # asciinema recordings (regenerated from scripts/)
 *.cast
+
+# Local agent settings, not shared
+.claude/

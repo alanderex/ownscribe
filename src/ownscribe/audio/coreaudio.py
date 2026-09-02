@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import platform
 import shutil
@@ -64,9 +65,38 @@ _BUILD_HINT = (
 # Releases only ever publish ownscribe-audio-arm64.
 _SUPPORTED_ARCH = "arm64"
 
+#: Written beside a downloaded helper, holding its digest. Presence alone is not
+#: enough: the documented workaround is to copy a locally built binary over the
+#: same path, which must not keep inheriting the "downloaded" label.
+_ORIGIN_MARKER = "ownscribe-audio.downloaded"
+
 #: True when the helper in use came from the download rather than a local build.
 #: Read by the pipeline to warn that silence auto-stop will not work.
 _helper_is_downloaded = False
+
+
+def _mark_downloaded(path: Path) -> None:
+    # A missing marker only costs a warning, never correctness.
+    with contextlib.suppress(OSError):
+        (path.parent / _ORIGIN_MARKER).write_text(hashlib.sha256(path.read_bytes()).hexdigest())
+
+
+def _is_downloaded(path: Path) -> bool:
+    """Whether `path` is the binary this tool downloaded, unchanged.
+
+    Set only in _download_binary before, so every later process — which finds the
+    cached file instead of downloading it — silently skipped the silence-auto-stop
+    warning. That is every run after the first.
+    """
+    marker = path.parent / _ORIGIN_MARKER
+    try:
+        recorded = marker.read_text().strip()
+    except OSError:
+        return False
+    try:
+        return recorded == hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return False
 
 
 def helper_is_downloaded() -> bool:
@@ -135,6 +165,7 @@ def _download_binary() -> Path | None:
                 err=True,
             )
         dest.chmod(0o755)
+        _mark_downloaded(dest)
         click.echo(f"Saved to {dest}")
         _helper_is_downloaded = True
         return dest
@@ -146,13 +177,18 @@ def _download_binary() -> Path | None:
 
 
 def _find_binary() -> Path | None:
+    global _helper_is_downloaded
+
     for candidate in _BINARY_CANDIDATES:
         if candidate.exists() and candidate.is_file():
             return candidate
 
-    # Check cache directory
+    # Check cache directory. This is also where a download lands, so re-derive
+    # whether the file there is still the downloaded one — a locally built helper
+    # copied over it (the documented workaround) is not.
     cached = _CACHE_DIR / "ownscribe-audio"
     if cached.exists() and cached.is_file():
+        _helper_is_downloaded = _is_downloaded(cached)
         return cached
 
     # Fall back to PATH

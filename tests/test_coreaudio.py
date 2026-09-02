@@ -286,3 +286,60 @@ class TestHelperDownloadIntegrity:
             recorder.start(tmp_path / "recording.wav")
 
         assert "silence auto-stop" not in capsys.readouterr().err
+
+
+class TestDownloadedHelperDetection:
+    """A cache hit must also know whether the helper came from a download.
+
+    _helper_is_downloaded was set only inside _download_binary, so every process
+    after the first — which finds the cached file rather than downloading it —
+    silently skipped the silence-auto-stop warning.
+    """
+
+    @staticmethod
+    def _resolve(cache_dir):
+        from ownscribe.audio import coreaudio
+
+        with (
+            mock.patch.object(coreaudio, "_CACHE_DIR", cache_dir),
+            mock.patch.object(coreaudio, "_BINARY_CANDIDATES", []),
+            mock.patch.object(coreaudio.shutil, "which", return_value=None),
+            mock.patch.object(coreaudio, "_helper_is_downloaded", False),
+        ):
+            found = coreaudio._find_binary()
+            return found, coreaudio.helper_is_downloaded()
+
+    def test_a_cached_download_is_still_recognised(self, tmp_path):
+        from ownscribe.audio import coreaudio
+
+        binary = tmp_path / "ownscribe-audio"
+        binary.write_bytes(b"downloaded helper")
+        coreaudio._mark_downloaded(binary)
+
+        found, is_downloaded = self._resolve(tmp_path)
+
+        assert found == binary
+        assert is_downloaded is True
+
+    def test_a_locally_built_helper_is_not_flagged(self, tmp_path):
+        """The documented workaround copies a local build over the same path."""
+        binary = tmp_path / "ownscribe-audio"
+        binary.write_bytes(b"locally built helper")
+
+        found, is_downloaded = self._resolve(tmp_path)
+
+        assert found == binary
+        assert is_downloaded is False
+
+    def test_overwriting_a_download_clears_the_flag(self, tmp_path):
+        """A stale marker must not keep labelling a replaced binary as downloaded."""
+        from ownscribe.audio import coreaudio
+
+        binary = tmp_path / "ownscribe-audio"
+        binary.write_bytes(b"downloaded helper")
+        coreaudio._mark_downloaded(binary)
+        binary.write_bytes(b"locally built helper")  # same path, new contents
+
+        _, is_downloaded = self._resolve(tmp_path)
+
+        assert is_downloaded is False

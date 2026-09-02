@@ -462,3 +462,33 @@ class TestCleanup:
 
         assert result.exit_code == 0
         assert "not found, skipping" in result.output
+
+
+class TestCleanupRequiresATarget:
+    """`--yes` means "don't ask about the targets I named", not "delete everything"."""
+
+    def test_bare_yes_is_a_usage_error(self):
+        from click.testing import CliRunner
+
+        from ownscribe.cli import cli
+
+        result = CliRunner().invoke(cli, ["cleanup", "--yes"])
+
+        assert result.exit_code != 0
+        assert "explicit target" in result.output
+
+    def test_yes_with_a_target_still_works(self, tmp_path, monkeypatch):
+        from click.testing import CliRunner
+
+        from ownscribe import cli as cli_mod
+        from ownscribe.cli import cli
+
+        doomed = tmp_path / "cache"
+        doomed.mkdir()
+        (doomed / "x").write_text("data")
+        monkeypatch.setattr(cli_mod, "_CACHE_DIR", str(doomed))
+
+        result = CliRunner().invoke(cli, ["cleanup", "--cache", "--yes"])
+
+        assert result.exit_code == 0
+        assert not doomed.exists()
