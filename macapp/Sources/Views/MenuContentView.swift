@@ -120,8 +120,8 @@ private struct FailedView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(
-                app.isScreenRecordingFailure ? "Permission needed" : "Something went wrong",
-                systemImage: app.isScreenRecordingFailure
+                app.isPermissionFailure ? "Permission needed" : "Something went wrong",
+                systemImage: app.isPermissionFailure
                     ? "lock.shield" : "exclamationmark.triangle.fill"
             )
             .foregroundStyle(.orange)
@@ -134,8 +134,8 @@ private struct FailedView: View {
             HStack {
                 // The pane is several levels deep in System Settings and the app
                 // cannot grant this itself, so offer the shortcut rather than prose.
-                if app.isScreenRecordingFailure {
-                    Button("Open Settings") { app.openScreenRecordingSettings() }
+                if app.isPermissionFailure {
+                    Button("Open Settings") { app.openPermissionSettings() }
                         .buttonStyle(.borderedProminent)
                 }
                 Button("Back") { app.backToIdle() }

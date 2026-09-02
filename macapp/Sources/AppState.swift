@@ -66,7 +66,13 @@ final class AppState: ObservableObject {
     private var timer: Timer?
     private var startDate: Date?
     private var didBootstrap = false
-    private var cancelled = false
+    /// Identifies the current pipeline launch. A single `cancelled` Bool could not
+    /// distinguish a stale callback from the live run: cancelProcessing set it, then
+    /// startRecording cleared it, and the SIGTERM'd process's onExit — still in
+    /// flight — was then applied to the *new* recording, invalidating its timer,
+    /// dropping its process handle (so Stop could no longer signal it) and flipping
+    /// the app to .failed while capture continued headless.
+    private var runToken = 0
     private var configWrite: Task<Void, Never> = Task {}
 
     init() {
@@ -118,11 +124,15 @@ final class AppState: ObservableObject {
         if didBootstrap { return }
         didBootstrap = true
         guard cli.isInstalled else { await install(); return }
+        // A newer app bundle expects a newer CLI. Without this the managed venv
+        // stayed on whatever it first installed, so every Python-side fix shipped
+        // in a new .app silently never reached the user.
+        if cli.needsUpgrade { await install(); return }
         await reloadConfig(seedQuickBar: true)
         refreshRecents()
     }
 
-    /// First-run: install the managed ownscribe environment with uv, then load config.
+    /// First-run setup, and the upgrade path when the app expects a newer CLI.
     func install() async {
         phase = .installing
         let result = await cli.install()
@@ -180,15 +190,20 @@ final class AppState: ObservableObject {
 
     func startRecording() {
         guard cli.isInstalled else { Task { await install() }; return }
-        cancelled = false
         Task {
             // Refuse to start without Screen Recording rather than recording silence:
             // ScreenCaptureKit fails with -3801 and the user finds out minutes later
             // via an empty transcript. The first request also always returns false —
             // macOS only applies a fresh grant after a relaunch — so say so plainly.
-            let granted = await Permissions.prime(mic: captureMic)
-            guard granted else {
+            let grants = await Permissions.prime(mic: captureMic)
+            guard grants.screenRecording else {
                 phase = .failed(Self.screenRecordingMessage)
+                return
+            }
+            // Same reasoning as Screen Recording: starting anyway produces a meeting
+            // with a silent or missing mic track, discovered only afterwards.
+            guard grants.microphone else {
+                phase = .failed(Self.microphoneMessage)
                 return
             }
             beginRecording()
@@ -217,20 +232,23 @@ final class AppState: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
+        runToken &+= 1
+        let token = runToken
         running = cli.launchPipeline(
             flags: flags,
             onEvent: { [weak self] event in
-                Task { @MainActor in self?.handleProgressEvent(event) }
+                Task { @MainActor in self?.handleProgressEvent(token, event) }
             }
         ) { [weak self] result in
-            Task { @MainActor in self?.handlePipelineExit(result) }
+            Task { @MainActor in self?.handlePipelineExit(token, result) }
         }
     }
 
     /// Fold one NDJSON progress event from the CLI into the UI state.
     /// Events arrive off the main thread and are hopped onto the main actor by the
     /// caller, so this runs isolated.
-    private func handleProgressEvent(_ event: ProgressEvent) {
+    private func handleProgressEvent(_ token: Int, _ event: ProgressEvent) {
+        guard token == runToken else { return }
         switch event.event {
         case "recording_stopped":
             // Capture is over and transcription is starting. Reaching this without the
@@ -289,17 +307,20 @@ final class AppState: ObservableObject {
     /// so no audio devices are held).
     func cancelProcessing() {
         guard phase == .processing else { return }
-        cancelled = true
+        // Retire this launch: any onExit still in flight for it becomes a no-op.
+        runToken &+= 1
         running?.terminate()
         running = nil
         timer?.invalidate(); timer = nil
         phase = .idle
     }
 
-    private func handlePipelineExit(_ result: CommandResult) {
+    private func handlePipelineExit(_ token: Int, _ result: CommandResult) {
+        // Ignore a callback from a launch that has been cancelled or superseded;
+        // acting on it would tear down whatever is running now.
+        guard token == runToken else { return }
         timer?.invalidate(); timer = nil
         running = nil
-        if cancelled { cancelled = false; return }
 
         guard result.ok else {
             phase = .failed(Self.firstMeaningfulLine(result.stderr)
@@ -416,7 +437,21 @@ final class AppState: ObservableObject {
             // The exception type and message are on the final line of a traceback.
             return lines.last
         }
-        return lines.first
+        // A torch/pyannote import prints deprecation warnings long before anything
+        // fails, so "first line" was usually library noise rather than the error.
+        // Prefer the first line that isn't recognisable noise; fall back to the
+        // first line rather than nothing, since an unrecognised error still helps.
+        return lines.first(where: { !isLibraryNoise($0) }) ?? lines.first
+    }
+
+    private static func isLibraryNoise(_ line: String) -> Bool {
+        let noise = [
+            "Warning:", "warnings.warn", "FutureWarning", "UserWarning",
+            "DeprecationWarning", "TqdmWarning", "torchaudio", "pkg_resources",
+        ]
+        // Click's own messages start "Error:"/"Usage:" and must never be filtered.
+        if line.hasPrefix("Error:") || line.hasPrefix("Usage:") { return false }
+        return noise.contains { line.contains($0) }
     }
 
     /// Cheap discriminator check — avoids a full JSON decode per stderr line.
@@ -432,14 +467,34 @@ final class AppState: ObservableObject {
         new grant after a relaunch.
         """
 
-    /// True when the failure the user is looking at is the missing Screen Recording
-    /// grant, so the UI can offer to open the right settings pane.
+    static let microphoneMessage = """
+        Ownscribe needs Microphone permission to record you alongside system audio.
+
+        Enable it for this app in System Settings › Privacy & Security › \
+        Microphone, then try again — or switch Capture to "System only".
+        """
+
+    /// True when the failure the user is looking at is a missing privacy grant, so
+    /// the UI can offer to open the right settings pane.
     var isScreenRecordingFailure: Bool {
         if case .failed(let message) = phase { return message == Self.screenRecordingMessage }
         return false
     }
 
-    func openScreenRecordingSettings() { Permissions.openScreenRecordingSettings() }
+    var isMicrophoneFailure: Bool {
+        if case .failed(let message) = phase { return message == Self.microphoneMessage }
+        return false
+    }
+
+    var isPermissionFailure: Bool { isScreenRecordingFailure || isMicrophoneFailure }
+
+    func openPermissionSettings() {
+        if isMicrophoneFailure {
+            Permissions.openMicrophoneSettings()
+        } else {
+            Permissions.openScreenRecordingSettings()
+        }
+    }
 
     static func formatElapsed(_ seconds: TimeInterval) -> String {
         let total = Int(seconds)

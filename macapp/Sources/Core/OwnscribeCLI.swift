@@ -45,7 +45,7 @@ final class OwnscribeCLI {
     /// To cut a release: `git tag macapp-vX.Y.Z && git push origin macapp-vX.Y.Z`,
     /// then bump the ref below in the same commit that bumps CFBundleShortVersionString
     /// in build-app.sh.
-    private static let macappRelease = "macapp-v0.15.1"
+    static let macappRelease = "macapp-v0.15.1"
 
     private static let pipSpec =
         "ownscribe[all] @ git+https://github.com/alanderex/ownscribe@\(macappRelease)"
@@ -58,6 +58,30 @@ final class OwnscribeCLI {
     }
 
     var isInstalled: Bool { cliURL != nil }
+
+    /// Ref recorded alongside the venv at install time. Compared against
+    /// macappRelease to notice that a newer app bundle wants a newer CLI.
+    private var stampURL: URL { Self.managedRoot.appendingPathComponent("installed-ref") }
+
+    private var installedRelease: String? {
+        try? String(contentsOf: stampURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// True when the managed venv holds a CLI older than this app expects.
+    ///
+    /// isInstalled only ever asked "does the executable exist", and install() ran on
+    /// first launch alone — so shipping a new app with a bumped macappRelease left
+    /// every existing user on the CLI they first installed, silently. A venv with no
+    /// stamp predates this check and is treated as needing an upgrade.
+    var needsUpgrade: Bool {
+        guard isInstalled else { return false }
+        return installedRelease != Self.macappRelease
+    }
+
+    private func recordInstalledRelease() {
+        try? Self.macappRelease.write(to: stampURL, atomically: true, encoding: .utf8)
+    }
 
     @discardableResult
     func run(_ args: [String]) async -> CommandResult {
@@ -92,14 +116,16 @@ final class OwnscribeCLI {
           echo "uv is required but was not found. Install it from https://docs.astral.sh/uv/ (e.g. 'brew install uv')." >&2
           exit 127
         fi
-        uv venv "\(venvDir.path)"
-        uv pip install --python "\(venvDir.path)/bin/python" "\(Self.pipSpec)"
+        [ -x "\(venvDir.path)/bin/python" ] || uv venv "\(venvDir.path)"
+        uv pip install --reinstall --python "\(venvDir.path)/bin/python" "\(Self.pipSpec)"
         """
-        return await CommandRunner.run(
+        let result = await CommandRunner.run(
             executable: URL(fileURLWithPath: "/bin/zsh"),
             args: ["-lc", script],
             cwd: Self.managedRoot
         )
+        if result.ok { recordInstalledRelease() }
+        return result
     }
 
     // MARK: - High-level helpers

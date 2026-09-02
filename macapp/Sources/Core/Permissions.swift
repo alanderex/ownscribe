@@ -7,10 +7,18 @@ import CoreGraphics
 /// than to the downloaded `ownscribe-audio` helper that actually opens the
 /// devices. The child then inherits the app's grant as the responsible process.
 enum Permissions {
-    /// Microphone consent (only needed when mixing in the mic).
-    static func ensureMicrophone() async {
-        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
-            _ = await AVCaptureDevice.requestAccess(for: .audio)
+    /// Microphone consent (only needed when mixing in the mic). Returns whether
+    /// access is granted — a `.denied` status used to be ignored, so a meeting could
+    /// record with a silent or missing mic track and only reveal it afterwards.
+    @discardableResult
+    static func ensureMicrophone() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return await AVCaptureDevice.requestAccess(for: .audio)
+        default:  // .denied, .restricted
+            return false
         }
     }
 
@@ -29,20 +37,34 @@ enum Permissions {
     /// without it the pipeline starts anyway and ScreenCaptureKit fails with -3801
     /// ("user has declined TCC for capturing apps, windows, displays"), which reaches
     /// the user only as an empty transcript minutes later.
-    static func prime(mic: Bool) async -> Bool {
-        let granted = await Task.detached { ensureScreenRecording() }.value
-        if mic { await ensureMicrophone() }
-        return granted
+    static func prime(mic: Bool) async -> Grants {
+        let screen = await Task.detached { ensureScreenRecording() }.value
+        // Not requested when the mic is off, and then not a blocker either.
+        let microphone = mic ? await ensureMicrophone() : true
+        return Grants(screenRecording: screen, microphone: microphone)
+    }
+
+    struct Grants {
+        let screenRecording: Bool
+        let microphone: Bool
     }
 
     /// True once the user has granted Screen Recording; never prompts.
     static var hasScreenRecording: Bool { CGPreflightScreenCaptureAccess() }
 
-    /// Open the Screen Recording pane directly — the setting is several levels deep
-    /// and the app cannot grant it itself.
+    /// Open a privacy pane directly — these settings are several levels deep and
+    /// the app cannot grant them itself.
     static func openScreenRecordingSettings() {
+        open("Privacy_ScreenCapture")
+    }
+
+    static func openMicrophoneSettings() {
+        open("Privacy_Microphone")
+    }
+
+    private static func open(_ anchor: String) {
         guard let url = URL(string:
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            "x-apple.systempreferences:com.apple.preference.security?\(anchor)")
         else { return }
         NSWorkspace.shared.open(url)
     }
