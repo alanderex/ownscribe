@@ -13,7 +13,15 @@ import soundfile as sf
 
 from ownscribe.audio.base import AudioRecorder
 
-_SILENCE_THRESHOLD = 1e-4  # ~-80 dB
+# RMS below this counts as silence for auto-stop. ~-40 dBFS, matching
+# kMicLoudThreshold in the Swift helper — both are judging a microphone.
+#
+# This was 1e-4 (~-80 dBFS), which no real room ever reaches: a quiet room
+# measured on an 8-minute test recording sat at RMS ~2.3e-3, twenty-three times
+# above it, so silence auto-stop could never fire on this backend either. The
+# Swift helper had the same bug via its measure (peak instead of RMS); this one
+# had it via the threshold.
+_SILENCE_THRESHOLD = 1e-2
 
 
 class SoundDeviceRecorder(AudioRecorder):
