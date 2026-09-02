@@ -58,13 +58,16 @@ class TestDownloadBinaryArchitecture:
             mock.patch.object(coreaudio.sys, "platform", "darwin"),
             mock.patch.object(coreaudio.platform, "machine", return_value="arm64"),
             mock.patch.object(coreaudio, "_CACHE_DIR", tmp_path),
-            mock.patch.object(coreaudio.urllib.request, "urlretrieve") as urlretrieve,
+            mock.patch.object(coreaudio.urllib.request, "urlopen") as urlopen,
             mock.patch.object(Path, "chmod"),
         ):
+            urlopen.return_value.__enter__.return_value.read.return_value = b"bin"
             result = coreaudio._download_binary()
 
         assert result == tmp_path / "ownscribe-audio"
-        assert "ownscribe-audio-arm64" in urlretrieve.call_args[0][0]
+        assert "ownscribe-audio-arm64" in urlopen.call_args[0][0]
+        # urlopen, not urlretrieve: the fetch needs a finite timeout.
+        assert urlopen.call_args.kwargs["timeout"] > 0
 
 
 class TestCoreAudioRecorderCommand:
@@ -215,3 +218,73 @@ class TestStderrDraining:
         recorder._drain_stderr(stream)  # returns rather than hanging
 
         assert recorder._stderr_chunks == []
+
+
+class TestHelperDownloadIntegrity:
+    """The helper is downloaded and executed with Screen Recording and mic access."""
+
+    def test_url_is_pinned_not_latest(self):
+        from ownscribe.audio import coreaudio
+
+        # "latest" means the executed binary can change between runs.
+        assert "/latest/" not in coreaudio._DOWNLOAD_URL
+        assert coreaudio._HELPER_RELEASE in coreaudio._DOWNLOAD_URL
+
+    def test_checksum_mismatch_refuses_the_binary(self, tmp_path):
+        from ownscribe.audio import coreaudio
+
+        binary = tmp_path / "ownscribe-audio"
+        binary.write_bytes(b"not the expected bytes")
+        with mock.patch.dict(coreaudio._HELPER_SHA256, {"arm64": "0" * 64}, clear=False):
+            assert coreaudio._verify_sha256(binary, "arm64") is False
+
+    def test_matching_checksum_is_accepted(self, tmp_path):
+        import hashlib
+
+        from ownscribe.audio import coreaudio
+
+        binary = tmp_path / "ownscribe-audio"
+        binary.write_bytes(b"payload")
+        digest = hashlib.sha256(b"payload").hexdigest()
+        with mock.patch.dict(coreaudio._HELPER_SHA256, {"arm64": digest}, clear=False):
+            assert coreaudio._verify_sha256(binary, "arm64") is True
+
+    def test_unverifiable_download_warns(self, tmp_path, capsys):
+        from ownscribe.audio import coreaudio
+
+        with (
+            mock.patch.object(coreaudio.sys, "platform", "darwin"),
+            mock.patch.object(coreaudio.platform, "machine", return_value="arm64"),
+            mock.patch.object(coreaudio, "_CACHE_DIR", tmp_path),
+            mock.patch.object(coreaudio, "_HELPER_SHA256", {}),
+            mock.patch.object(coreaudio.urllib.request, "urlopen") as urlopen,
+            mock.patch.object(Path, "chmod"),
+        ):
+            urlopen.return_value.__enter__.return_value.read.return_value = b"bin"
+            coreaudio._download_binary()
+
+        assert "without a checksum" in capsys.readouterr().err
+
+    def test_downloaded_helper_warns_that_silence_autostop_will_not_work(self, tmp_path, capsys):
+        from ownscribe.audio import coreaudio
+
+        recorder = _make_recorder(silence_timeout=60)
+        with (
+            mock.patch.object(coreaudio, "_helper_is_downloaded", True),
+            mock.patch("ownscribe.audio.coreaudio.subprocess.Popen"),
+        ):
+            recorder.start(tmp_path / "recording.wav")
+
+        assert "silence auto-stop" in capsys.readouterr().err
+
+    def test_locally_built_helper_does_not_warn(self, tmp_path, capsys):
+        from ownscribe.audio import coreaudio
+
+        recorder = _make_recorder(silence_timeout=60)
+        with (
+            mock.patch.object(coreaudio, "_helper_is_downloaded", False),
+            mock.patch("ownscribe.audio.coreaudio.subprocess.Popen"),
+        ):
+            recorder.start(tmp_path / "recording.wav")
+
+        assert "silence auto-stop" not in capsys.readouterr().err

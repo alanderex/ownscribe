@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import platform
 import shutil
 import signal
@@ -20,6 +21,7 @@ from ownscribe.audio.base import AudioRecorder
 # wait() returns immediately on exit, so generous values cost nothing in the normal case.
 _STOP_TIMEOUT = 30  # seconds to wait after SIGINT (allows track merging)
 _KILL_TIMEOUT = 10  # seconds to wait after SIGTERM before SIGKILL
+_DOWNLOAD_TIMEOUT = 120  # seconds; a hung fetch must not block a meeting
 
 # Look for binary relative to package, then in PATH
 _BINARY_CANDIDATES = [
@@ -28,26 +30,78 @@ _BINARY_CANDIDATES = [
 ]
 
 _CACHE_DIR = Path.home() / ".local" / "share" / "ownscribe" / "bin"
-# Upstream (paberr) publishes the only prebuilt helper, so this stays pointed there.
+
+# Upstream (paberr) publishes the only prebuilt helper.
 #
+# Pinned, not "latest": the helper is downloaded and executed with Screen Recording
+# and microphone access, so what it is must not change under us between runs.
+_HELPER_RELEASE = "v0.15.0"
+_DOWNLOAD_URL = (
+    "https://github.com/paberr/ownscribe/releases/download/"
+    f"{_HELPER_RELEASE}/ownscribe-audio-{{arch}}"
+)
+
+# SHA-256 of each published asset, verified after download and before chmod +x.
+# Fill in by downloading the asset once and recording `shasum -a 256`; an entry
+# that is absent means the binary cannot be verified, and _download_binary says so
+# rather than pretending otherwise.
+_HELPER_SHA256: dict[str, str] = {
+    # "arm64": "<sha256 of ownscribe-audio-arm64 at _HELPER_RELEASE>",
+}
+
 # CAUTION: swift/ is no longer byte-identical to upstream. It carries an RMS-based
-# silence measure that upstream's peak-based one lacks, so a *downloaded* helper will
-# not auto-stop on silence in a normal room (peak treats a single keystroke as sound
-# and resets the timer). Until that lands upstream, build the helper locally:
+# silence measure that upstream's peak-based one lacks, so a downloaded helper will
+# not auto-stop on silence in a normal room (peak treats a single keystroke as
+# sound and resets the timer). Build locally to get it:
 #
 #     bash swift/build.sh
 #     cp bin/ownscribe-audio ~/.local/share/ownscribe/bin/ownscribe-audio
 #
-# _find_binary checks that cache directory before falling back to this download, so a
-# locally built helper wins for every app and venv on the machine.
-_DOWNLOAD_URL = "https://github.com/paberr/ownscribe/releases/latest/download/ownscribe-audio-{arch}"
+# _find_binary prefers that cache over the download, for every app and venv.
+_BUILD_HINT = (
+    "For silence auto-stop, build the helper from this repo instead:\n"
+    "  bash swift/build.sh && cp bin/ownscribe-audio "
+    "~/.local/share/ownscribe/bin/ownscribe-audio"
+)
 
 # Releases only ever publish ownscribe-audio-arm64.
 _SUPPORTED_ARCH = "arm64"
 
+#: True when the helper in use came from the download rather than a local build.
+#: Read by the pipeline to warn that silence auto-stop will not work.
+_helper_is_downloaded = False
+
+
+def helper_is_downloaded() -> bool:
+    """Whether the resolved helper was fetched from upstream releases."""
+    return _helper_is_downloaded
+
+
+def _verify_sha256(path: Path, arch: str) -> bool:
+    """Check a downloaded helper against its recorded digest.
+
+    Returns False only on a real mismatch. A missing digest is not a mismatch —
+    it is reported by the caller — because refusing outright would break the
+    documented "downloads automatically on first run" flow.
+    """
+    expected = _HELPER_SHA256.get(arch)
+    if not expected:
+        return True
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest == expected:
+        return True
+    click.echo(
+        f"Refusing to use ownscribe-audio: checksum mismatch.\n"
+        f"  expected {expected}\n  got      {digest}\n"
+        "The published binary changed unexpectedly. Not executing it.",
+        err=True,
+    )
+    return False
+
 
 def _download_binary() -> Path | None:
     """Download the prebuilt ownscribe-audio binary from GitHub Releases."""
+    global _helper_is_downloaded
     if sys.platform != "darwin":
         return None
 
@@ -69,10 +123,23 @@ def _download_binary() -> Path | None:
 
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        click.echo(f"Downloading ownscribe-audio ({arch}) from GitHub Releases...")
-        urllib.request.urlretrieve(url, dest)
+        click.echo(f"Downloading ownscribe-audio ({arch}) from {_HELPER_RELEASE}...")
+        # A finite timeout: this runs before a meeting, and urlretrieve would
+        # otherwise wait forever on a black-holed connection.
+        with urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as response:
+            dest.write_bytes(response.read())
+        if not _verify_sha256(dest, arch):
+            dest.unlink(missing_ok=True)
+            return None
+        if not _HELPER_SHA256.get(arch):
+            click.echo(
+                "Warning: this helper was downloaded without a checksum to verify it "
+                f"against, and it is what captures your audio.\n{_BUILD_HINT}",
+                err=True,
+            )
         dest.chmod(0o755)
         click.echo(f"Saved to {dest}")
+        _helper_is_downloaded = True
         return dest
     except Exception as e:
         click.echo(f"Download failed: {e}", err=True)
@@ -125,6 +192,17 @@ class CoreAudioRecorder(AudioRecorder):
     def start(self, output_path: Path) -> None:
         if not self._binary:
             raise RuntimeError("ownscribe-audio binary not found. Run: bash swift/build.sh")
+
+        # Don't advertise a setting the running helper cannot honour: upstream's
+        # published binary still decides silence by peak, which a single keystroke
+        # resets, so auto-stop effectively never fires in a room with a noise floor.
+        if self._silence_timeout > 0 and helper_is_downloaded():
+            click.echo(
+                "Warning: silence auto-stop needs the RMS silence measure, which the "
+                f"downloaded helper ({_HELPER_RELEASE}) does not have — recording will "
+                f"not stop on its own.\n{_BUILD_HINT}",
+                err=True,
+            )
 
         cmd = [str(self._binary), "capture", "--output", str(output_path)]
         if self._capture_mode == "all":
