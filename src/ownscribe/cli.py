@@ -22,12 +22,12 @@ def _dir_size(path: str) -> str:
     p = Path(path)
     if not p.exists():
         return "(not found)"
-    total = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+    size = float(sum(f.stat().st_size for f in p.rglob("*") if f.is_file()))
     for unit in ("B", "KB", "MB", "GB"):
-        if total < 1024:
-            return f"{total:.1f} {unit}"
-        total /= 1024
-    return f"{total:.1f} TB"
+        if size < 1024:
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
 
 
 @click.group(invoke_without_command=True)
@@ -52,15 +52,20 @@ def _dir_size(path: str) -> str:
 )
 @click.option("--template", default=None, help="Summarization template (meeting, lecture, brief, or custom).")
 @click.option(
-    "--silence-timeout", default=None, type=click.IntRange(min=0),
+    "--silence-timeout",
+    default=None,
+    type=click.IntRange(min=0),
     help="Seconds of silence before auto-stopping recording (0 to disable).",
 )
 @click.option(
-    "--speakers", default=None, type=click.IntRange(min=1),
+    "--speakers",
+    default=None,
+    type=click.IntRange(min=1),
     help="Exact number of speakers for diarization (sets min and max).",
 )
 @click.option(
-    "--title", default=None,
+    "--title",
+    default=None,
     help="Name this meeting; the output folder becomes YYMMDD-your-title.",
 )
 @click.pass_context
@@ -134,6 +139,7 @@ def cli(
 
     if ctx.invoked_subcommand is None:
         from ownscribe.pipeline import run_pipeline
+
         # Per-run, not config: a title belongs to one meeting, never persisted.
         run_pipeline(config, title=title)
 
@@ -155,11 +161,13 @@ def ask(ctx: click.Context, question: str, since: str | None, limit: int | None)
 def devices() -> None:
     """List available audio input devices."""
     from ownscribe.audio.coreaudio import CoreAudioRecorder
+
     recorder = CoreAudioRecorder()
     if recorder.is_available():
         click.echo(recorder.list_devices())
     else:
         import sounddevice as sd
+
         click.echo("Available audio devices:\n")
         click.echo(sd.query_devices())
 
@@ -170,14 +178,21 @@ def devices() -> None:
 @click.option("--model", default=None, help="Whisper model size.")
 @click.option("--language", default=None, help="Language code for transcription (e.g. en, de, fr).")
 @click.option(
-    "--speakers", default=None, type=click.IntRange(min=1),
+    "--speakers",
+    default=None,
+    type=click.IntRange(min=1),
     help="Exact number of speakers for diarization (sets min and max).",
 )
 @click.option("--format", "output_format", type=click.Choice(["markdown", "json"]), default=None)
 @click.pass_context
 def transcribe(
-    ctx: click.Context, file: str, diarize: bool,
-    model: str | None, language: str | None, speakers: int | None, output_format: str | None,
+    ctx: click.Context,
+    file: str,
+    diarize: bool,
+    model: str | None,
+    language: str | None,
+    speakers: int | None,
+    output_format: str | None,
 ) -> None:
     """Transcribe an audio file."""
     config = ctx.obj["config"]
@@ -194,6 +209,7 @@ def transcribe(
         config.output.format = output_format
 
     from ownscribe.pipeline import run_transcribe
+
     run_transcribe(config, file)
 
 
@@ -223,6 +239,7 @@ def warmup(
         config.diarization.enabled = with_diarization
 
     from ownscribe.pipeline import run_warmup
+
     run_warmup(config)
 
 
@@ -237,6 +254,7 @@ def summarize(ctx: click.Context, file: str, template: str | None) -> None:
         config.summarization.template = template
 
     from ownscribe.pipeline import run_summarize
+
     run_summarize(config, file)
 
 
@@ -247,8 +265,11 @@ def summarize(ctx: click.Context, file: str, template: str | None) -> None:
 @click.option("--template", default=None, help="Summarization template (meeting, lecture, brief, or custom).")
 @click.pass_context
 def resume(
-    ctx: click.Context, directory: str,
-    model: str | None, language: str | None, template: str | None,
+    ctx: click.Context,
+    directory: str,
+    model: str | None,
+    language: str | None,
+    template: str | None,
 ) -> None:
     """Resume a partially-completed pipeline in a meeting directory."""
     config = ctx.obj["config"]
@@ -260,6 +281,7 @@ def resume(
         config.summarization.template = template
 
     from ownscribe.pipeline import run_resume
+
     run_resume(config, directory)
 
 
@@ -267,6 +289,7 @@ def resume(
 def apps() -> None:
     """List running apps with PIDs for use with --pid."""
     from ownscribe.audio.coreaudio import CoreAudioRecorder
+
     recorder = CoreAudioRecorder()
     click.echo(recorder.list_apps())
 
@@ -321,9 +344,7 @@ def _parse_speaker_map(pairs: tuple[str, ...]) -> dict[str, str]:
         label = label.strip()
         name = name.strip()
         if not sep or not label or not name:
-            raise click.BadParameter(
-                f"Expected LABEL=Name, got {pair!r}", param_hint="--map"
-            )
+            raise click.BadParameter(f"Expected LABEL=Name, got {pair!r}", param_hint="--map")
         if "\n" in name:
             raise click.BadParameter(f"Name may not contain newlines: {name!r}", param_hint="--map")
         mapping[label] = name
@@ -345,7 +366,11 @@ def list_speakers_cmd(transcript: str) -> None:
 @cli.command("rename-speakers")
 @click.argument("transcript", type=click.Path(exists=True, dir_okay=False))
 @click.option(
-    "--map", "maps", multiple=True, required=True, metavar="LABEL=Name",
+    "--map",
+    "maps",
+    multiple=True,
+    required=True,
+    metavar="LABEL=Name",
     help="Rename a speaker label, e.g. --map SPEAKER_00=Anna (repeatable).",
 )
 def rename_speakers_cmd(transcript: str, maps: tuple[str, ...]) -> None:

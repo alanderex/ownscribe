@@ -54,6 +54,7 @@ dev = [
     "pytest>=8.0",
     "pytest-httpserver>=1.1",
     "ruff>=0.9",
+    "mypy>=1.11",
 ]
 
 [build-system]
@@ -73,3 +74,12 @@ markers = [
     "hardware: tests that require audio hardware",
     "slow: slow-running tests",
 ]
+
+[tool.mypy]
+python_version = "3.12"
+# The ML stack (whisperx, pyannote, llama_cpp, sounddevice, ...) ships no stubs.
+ignore_missing_imports = true
+# Not strict: the goal is catching real mistakes in fully annotated code, not
+# retrofitting a type system. It already found a possibly-None Path being passed
+# where a Path was required.
+warn_unused_ignores = true

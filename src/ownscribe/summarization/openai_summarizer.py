@@ -28,8 +28,11 @@ class OpenAISummarizer(Summarizer):
         self._client = openai.OpenAI(base_url=base_url, api_key=api_key, timeout=_HTTP_TIMEOUT)
 
     def chat(
-        self, system_prompt: str, user_prompt: str,
-        json_mode: bool = False, json_schema: dict | None = None,
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        json_mode: bool = False,
+        json_schema: dict | None = None,
     ) -> str:
         messages = [
             {"role": "system", "content": system_prompt},

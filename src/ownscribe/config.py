@@ -124,6 +124,7 @@ class OutputConfig:
     def uses_separate_audio_dir(self) -> bool:
         return self.resolved_audio_dir != self.resolved_dir
 
+
 @dataclass
 class Config:
     audio: AudioConfig = field(default_factory=AudioConfig)
@@ -191,9 +192,7 @@ def _coerce(section: str, key: str, current, value):
             raise ValueError(f"{section}.{key} must be text, got {value!r}")
         allowed = _ENUMS.get((section, key))
         if allowed and value and value not in allowed:
-            raise ValueError(
-                f"{section}.{key} must be one of {', '.join(allowed)}, got {value!r}"
-            )
+            raise ValueError(f"{section}.{key} must be one of {', '.join(allowed)}, got {value!r}")
         return value
     if not isinstance(value, want):
         raise ValueError(f"{section}.{key} must be {want.__name__}, got {value!r}")

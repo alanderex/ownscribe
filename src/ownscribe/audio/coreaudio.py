@@ -36,10 +36,7 @@ _CACHE_DIR = Path.home() / ".local" / "share" / "ownscribe" / "bin"
 # Pinned, not "latest": the helper is downloaded and executed with Screen Recording
 # and microphone access, so what it is must not change under us between runs.
 _HELPER_RELEASE = "v0.15.0"
-_DOWNLOAD_URL = (
-    "https://github.com/paberr/ownscribe/releases/download/"
-    f"{_HELPER_RELEASE}/ownscribe-audio-{{arch}}"
-)
+_DOWNLOAD_URL = f"https://github.com/paberr/ownscribe/releases/download/{_HELPER_RELEASE}/ownscribe-audio-{{arch}}"
 
 # SHA-256 of each published asset, verified after download and before chmod +x.
 # Fill in by downloading the asset once and recording `shasum -a 256`; an entry
@@ -171,8 +168,11 @@ class CoreAudioRecorder(AudioRecorder):
     """Records system audio using the ownscribe-audio Swift helper."""
 
     def __init__(
-        self, mic: bool = False, mic_device: str = "",
-        capture_mode: str = "picker", silence_timeout: int = 0,
+        self,
+        mic: bool = False,
+        mic_device: str = "",
+        capture_mode: str = "picker",
+        silence_timeout: int = 0,
     ) -> None:
         self._mic = mic
         self._mic_device = mic_device
@@ -227,9 +227,7 @@ class CoreAudioRecorder(AudioRecorder):
             process_group=0,
         )
         self._stderr_chunks = []
-        self._stderr_thread = threading.Thread(
-            target=self._drain_stderr, args=(self._process.stderr,), daemon=True
-        )
+        self._stderr_thread = threading.Thread(target=self._drain_stderr, args=(self._process.stderr,), daemon=True)
         self._stderr_thread.start()
 
     def _drain_stderr(self, stream) -> None:
@@ -305,9 +303,9 @@ class CoreAudioRecorder(AudioRecorder):
                 )
                 _NOISE_LINES = ("[MIC_MUTED]", "[MIC_UNMUTED]", "[SILENCE_TIMEOUT]")
                 lines = [
-                    line for line in stderr_output.strip().splitlines()
-                    if line not in _NOISE_LINES
-                    and not line.startswith(_NOISE_PREFIXES)
+                    line
+                    for line in stderr_output.strip().splitlines()
+                    if line not in _NOISE_LINES and not line.startswith(_NOISE_PREFIXES)
                 ]
                 if lines:
                     click.echo("\n".join(lines), err=True)

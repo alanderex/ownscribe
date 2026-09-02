@@ -37,7 +37,7 @@ def parse_transcript_json(text: str) -> TranscriptResult | None:
             continue
         words = [
             Word(
-                text=w.get("word", w.get("text", "")),
+                text=str(w.get("word", w.get("text", "")) or ""),
                 start=float(w.get("start", 0.0)),
                 end=float(w.get("end", 0.0)),
                 speaker=w.get("speaker"),

@@ -7,6 +7,7 @@ import logging
 import os
 import warnings
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -42,16 +43,15 @@ class WhisperXTranscriber(Transcriber):
         self._diar_config = diarization_config
         self._progress = progress or NullProgress()
         self._need_word_timestamps = need_word_timestamps
-        self._model = None
+        # Set by _load_model before any use. The ASR handle is backend-specific
+        # (a WhisperX model here, a repo id in the MLX subclass), so Any is the
+        # honest annotation rather than a concrete type plus suppressions.
+        self._model: Any = None
         self._align_models: dict[str, tuple[object, object]] = {}
         self._diarize_model = None
 
     def _will_diarize(self) -> bool:
-        return bool(
-            self._diar_config
-            and self._diar_config.enabled
-            and self._diar_config.hf_token
-        )
+        return bool(self._diar_config and self._diar_config.enabled and self._diar_config.hf_token)
 
     def _should_align(self) -> bool:
         """Whether the wav2vec2 alignment pass is worth its runtime.
@@ -116,9 +116,7 @@ class WhisperXTranscriber(Transcriber):
             self._set_detail(step_key, f"{stage_label}: {int(event.percent)}%")
 
     def _capture_download_output(self, step_key: str, stage_label: str, fn, *args, **kwargs):
-        writer = DownloadProgressWriter(
-            lambda event: self._on_download_progress(step_key, stage_label, event)
-        )
+        writer = DownloadProgressWriter(lambda event: self._on_download_progress(step_key, stage_label, event))
         self._set_detail(step_key, stage_label)
         with contextlib.ExitStack() as stack:
             stack.enter_context(contextlib.redirect_stdout(writer))
@@ -178,6 +176,9 @@ class WhisperXTranscriber(Transcriber):
         if self._diarize_model is not None:
             return self._diarize_model
 
+        # Only reachable behind _will_diarize(), which requires a config; asserting
+        # keeps that precondition explicit instead of implied.
+        assert self._diar_config is not None
         device = self._resolve_diarization_device(self._diar_config.device)
         self._diarize_model = self._capture_download_output(
             step_key,
@@ -226,11 +227,7 @@ class WhisperXTranscriber(Transcriber):
         self._configure_runtime_env()
 
         hf_token_warning: str | None = None
-        if (
-            self._diar_config
-            and self._diar_config.enabled
-            and not self._diar_config.hf_token
-        ):
+        if self._diar_config and self._diar_config.enabled and not self._diar_config.hf_token:
             hf_token_warning = (
                 "Diarization requested but no HF token configured. "
                 "Set HF_TOKEN env var or hf_token in config. Skipping."
@@ -277,18 +274,18 @@ class WhisperXTranscriber(Transcriber):
                 tx_scale = 0.5 if align_enabled else 1.0
                 tx_writer = ProgressWriter(
                     lambda frac: progress.update("transcribing", frac),
-                    offset=0.0, scale=tx_scale,
+                    offset=0.0,
+                    scale=tx_scale,
                 )
                 align_writer = ProgressWriter(
                     lambda frac: progress.update("transcribing", frac),
-                    offset=0.5, scale=0.5,
+                    offset=0.5,
+                    scale=0.5,
                 )
 
                 # Nested redirect overrides devnull → captures progress
                 with contextlib.redirect_stdout(tx_writer):
-                    result = self._model.transcribe(
-                        audio, batch_size=16, print_progress=True, combined_progress=True
-                    )
+                    result = self._model.transcribe(audio, batch_size=16, print_progress=True, combined_progress=True)
 
                 language = result.get("language", "")
 
@@ -371,9 +368,7 @@ class WhisperXTranscriber(Transcriber):
             diarize_kwargs["max_speakers"] = self._diar_config.max_speakers
 
         # Call pyannote pipeline directly with progress hook
-        diarization = diarize_model.model(
-            audio_data, hook=progress.diarization_hook, **diarize_kwargs
-        )
+        diarization = diarize_model.model(audio_data, hook=progress.diarization_hook, **diarize_kwargs)
 
         progress.complete("diarizing")
 

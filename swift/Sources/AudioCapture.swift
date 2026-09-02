@@ -372,8 +372,15 @@ func findInputDevice(named name: String) throws -> AudioDeviceID {
         var bufSize: UInt32 = 0
         AudioObjectGetPropertyDataSize(deviceID, &inputAddr, 0, nil, &bufSize)
         if bufSize > 0 {
-            let bufferList = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: 1)
-            defer { bufferList.deallocate() }
+            // bufSize bytes, not one AudioBufferList: the struct holds a single
+            // inline AudioBuffer, so a device reporting several would write past
+            // the allocation. AudioObjectGetPropertyDataSize already told us how
+            // much the property needs.
+            let raw = UnsafeMutableRawPointer.allocate(
+                byteCount: Int(bufSize),
+                alignment: MemoryLayout<AudioBufferList>.alignment)
+            defer { raw.deallocate() }
+            let bufferList = raw.bindMemory(to: AudioBufferList.self, capacity: 1)
             AudioObjectGetPropertyData(deviceID, &inputAddr, 0, nil, &bufSize, bufferList)
             let inputChannels = UnsafeMutableAudioBufferListPointer(bufferList)
                 .reduce(0) { $0 + Int($1.mNumberChannels) }
@@ -741,8 +748,12 @@ func listInputDevices() {
         AudioObjectGetPropertyDataSize(deviceID, &inputAddr, 0, nil, &bufSize)
         guard bufSize > 0 else { continue }
 
-        let bufferList = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: 1)
-        defer { bufferList.deallocate() }
+        // See findInputDevice: allocate the size the property actually reports.
+        let raw = UnsafeMutableRawPointer.allocate(
+            byteCount: Int(bufSize),
+            alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { raw.deallocate() }
+        let bufferList = raw.bindMemory(to: AudioBufferList.self, capacity: 1)
         AudioObjectGetPropertyData(deviceID, &inputAddr, 0, nil, &bufSize, bufferList)
         let inputChannels = UnsafeMutableAudioBufferListPointer(bufferList)
             .reduce(0) { $0 + Int($1.mNumberChannels) }

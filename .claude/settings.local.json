@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run *)",
+      "Bash(./bin/ownscribe-audio --help)",
+      "Bash(./bin/ownscribe-audio list-devices *)",
+      "Bash(grep -v -E \"Warning|warn|FutureWarning|UserWarning|^\\\\s*$\")"
+    ]
+  }
+}

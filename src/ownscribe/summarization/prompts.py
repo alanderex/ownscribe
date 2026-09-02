@@ -15,6 +15,7 @@ def clean_response(text: str) -> str:
         text = _ORPHAN_THINK_CLOSE_RE.sub("", text).strip()
     return text
 
+
 MEETING_SUMMARY_SYSTEM = (
     "You are a meeting notes assistant. You produce clear, structured summaries of meeting transcripts."
 )
@@ -61,9 +62,7 @@ Bullet points of the most important insights and conclusions.
 Transcript:
 {transcript}"""
 
-BRIEF_SUMMARY_SYSTEM = (
-    "You are a concise summarization assistant. You produce short, scannable summaries."
-)
+BRIEF_SUMMARY_SYSTEM = "You are a concise summarization assistant. You produce short, scannable summaries."
 
 BRIEF_SUMMARY_PROMPT = """Summarize the following transcript into 3-5 concise bullet points.
 Return only the bullet points, no headers or additional structure.
@@ -106,8 +105,7 @@ def format_partials(partials: list[str]) -> str:
     """Render per-chunk summaries as a labelled block for the reduce prompt."""
     total = len(partials)
     return "\n\n".join(
-        f"{PARTIAL_HEADER.format(index=i, total=total)}\n{partial.strip()}"
-        for i, partial in enumerate(partials, 1)
+        f"{PARTIAL_HEADER.format(index=i, total=total)}\n{partial.strip()}" for i, partial in enumerate(partials, 1)
     )
 
 
@@ -128,7 +126,8 @@ TITLE_PROMPT = (
 
 
 def resolve_template(
-    template_name: str, user_templates: dict | None = None,
+    template_name: str,
+    user_templates: dict | None = None,
 ) -> tuple[str, str]:
     """Resolve a template name to (system_prompt, user_prompt).
 
@@ -183,15 +182,15 @@ SEARCH_ANSWER_SYSTEM = (
     "2. Then list supporting quotes grouped by meeting:\n"
     "\n"
     "**Meeting display name**\n"
-    "- **SPEAKER** [timestamp]: \"Verbatim quote from the transcript.\"\n"
+    '- **SPEAKER** [timestamp]: "Verbatim quote from the transcript."\n'
     "\n"
     "Example:\n"
     "\n"
     "The deadline was set for March 15th.\n"
     "\n"
     "**2026-02-13 15:01 — Quarterly Planning**\n"
-    "- **SPEAKER_03** [00:13]: \"So the deadline for Q1 deliverables is March 15th.\"\n"
-    "- **SPEAKER_01** [00:21]: \"They will hear from us by Friday.\"\n"
+    '- **SPEAKER_03** [00:13]: "So the deadline for Q1 deliverables is March 15th."\n'
+    '- **SPEAKER_01** [00:21]: "They will hear from us by Friday."\n'
     "\n"
     "Rules:\n"
     "- Use the meeting display name from the transcript header (after the folder name in brackets).\n"

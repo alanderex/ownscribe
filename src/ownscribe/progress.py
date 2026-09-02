@@ -285,7 +285,7 @@ class DownloadProgressWriter:
                 break
             idx = min(idxs)
             chunk = self._buffer[:idx]
-            self._buffer = self._buffer[idx + 1:]
+            self._buffer = self._buffer[idx + 1 :]
             self._consume(chunk)
         return len(text)
 
@@ -341,12 +341,14 @@ class PipelineProgress:
             steps.append(_Step("transcribing", "Transcribing", indent=0))
         if diarize:
             steps.append(_Step("diarizing", "Diarizing", indent=0))
-            steps.extend([
-                _Step("segmentation", "Segmentation", indent=1),
-                _Step("speaker_counting", "Speaker counting", indent=1),
-                _Step("embeddings", "Embeddings", indent=1),
-                _Step("clustering", "Clustering", indent=1),
-            ])
+            steps.extend(
+                [
+                    _Step("segmentation", "Segmentation", indent=1),
+                    _Step("speaker_counting", "Speaker counting", indent=1),
+                    _Step("embeddings", "Embeddings", indent=1),
+                    _Step("clustering", "Clustering", indent=1),
+                ]
+            )
         if summarize:
             steps.append(_Step("summarizing", "Summarizing", indent=0))
             if download_summarizer:
@@ -357,6 +359,7 @@ class PipelineProgress:
         self._step_map: dict[str, _Step] = {s.key: s for s in steps}
         self._active: set[str] = set()
         self._completed: set[str] = set()
+        self._failed: set[str] = set()
         self._progress: dict[str, float] = {}
         self._details: dict[str, str] = {}
         self._lock = threading.Lock()
@@ -378,9 +381,7 @@ class PipelineProgress:
             # immediately rather than discovering steps as they start.
             emit_event(
                 "steps",
-                steps=[
-                    {"key": s.key, "label": s.label, "indent": s.indent} for s in self._steps
-                ],
+                steps=[{"key": s.key, "label": s.label, "indent": s.indent} for s in self._steps],
             )
         return self
 
@@ -400,10 +401,12 @@ class PipelineProgress:
                 emit_event("failed" if failed else "complete", key=key)
             emit_event("done", ok=not failed)
             return
-        # Final render: mark any remaining active steps as completed
+        # Steps still running at teardown are only "done" if nothing went wrong.
+        # Marking them complete unconditionally printed "✔ Transcribing done."
+        # immediately before the traceback that killed it.
         with self._lock:
             for key in list(self._active):
-                self._completed.add(key)
+                (self._failed if failed else self._completed).add(key)
                 self._progress.pop(key, None)
                 self._details.pop(key, None)
             self._active.clear()
@@ -462,9 +465,15 @@ class PipelineProgress:
             emit_event("complete", key=key)
 
     def fail(self, key: str) -> None:
-        """Mark a step as failed — removes from active without completing."""
+        """Mark a step as failed.
+
+        Records the failure rather than only dropping the step from _active: an
+        unrecorded step renders as an empty circle, indistinguishable from one that
+        never ran.
+        """
         with self._lock:
             self._active.discard(key)
+            self._failed.add(key)
             self._progress.pop(key, None)
             self._details.pop(key, None)
             self._emitted_fraction.pop(key, None)
@@ -480,11 +489,7 @@ class PipelineProgress:
                 if self._events:
                     last = self._emitted_fraction.get(key)
                     # Always emit the ends, so a bar reliably starts at 0 and reaches 1.
-                    if (
-                        last is None
-                        or abs(clamped - last) >= _MIN_FRACTION_DELTA
-                        or clamped in (0.0, 1.0)
-                    ):
+                    if last is None or abs(clamped - last) >= _MIN_FRACTION_DELTA or clamped in (0.0, 1.0):
                         self._emitted_fraction[key] = clamped
                         should_emit = True
         if should_emit:
@@ -526,6 +531,7 @@ class PipelineProgress:
         with self._lock:
             active = set(self._active)
             completed = set(self._completed)
+            failed = set(self._failed)
             progress = dict(self._progress)
             details = dict(self._details)
 
@@ -538,7 +544,9 @@ class PipelineProgress:
         for step in self._steps:
             indent = "    " if step.indent == 1 else "  "
 
-            if step.key in completed:
+            if step.key in failed:
+                lines.append(f"{indent}\u2717 {step.label} failed.")
+            elif step.key in completed:
                 lines.append(f"{indent}\u2714 {step.label} done.")
             elif step.key in active:
                 frac = progress.get(step.key)

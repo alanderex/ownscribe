@@ -14,6 +14,10 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --only-group dev
       - run: uv run ruff check src/ tests/
+      # Documented in CONTRIBUTING but previously unenforced, so the tree drifted.
+      - run: uv run ruff format --check src/ tests/
+      # Everything is annotated already; this verifies the annotations.
+      - run: uv run mypy src/
 
   test:
     runs-on: macos-14
@@ -26,3 +30,14 @@ jobs:
         run: bash swift/build.sh
       - run: uv sync --dev
       - run: uv run pytest -v -m "not hardware"
+
+  macapp:
+    # The menu-bar app had no automated verification at all: a Swift compile error
+    # could land on main unnoticed. build-app.sh needs no Xcode project.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Ownscribe.app
+        run: bash macapp/build-app.sh
+      - name: Build a side-by-side variant
+        run: bash macapp/build-app.sh --variant CI

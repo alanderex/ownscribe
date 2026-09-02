@@ -102,11 +102,7 @@ class SoundDeviceRecorder(AudioRecorder):
 
     @property
     def is_recording(self) -> bool:
-        return (
-            not self._timed_out
-            and self._stream is not None
-            and getattr(self._stream, "active", False)
-        )
+        return not self._timed_out and self._stream is not None and getattr(self._stream, "active", False)
 
     @property
     def silence_timed_out(self) -> bool:

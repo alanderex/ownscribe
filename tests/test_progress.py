@@ -19,9 +19,7 @@ from ownscribe.progress import (
 
 class TestDownloadProgressParsing:
     def test_parses_tqdm_style_line(self):
-        event = parse_download_progress(
-            "model.bin: 26%|##5       | 123MB/466MB [00:10<00:20, 12.3MB/s]"
-        )
+        event = parse_download_progress("model.bin: 26%|##5       | 123MB/466MB [00:10<00:20, 12.3MB/s]")
 
         assert event is not None
         assert event.filename == "model.bin"
@@ -277,9 +275,7 @@ class TestProgressEvents:
             p.begin("summarizing")
             p.fail("summarizing")
 
-        assert ("failed", "summarizing") in [
-            (e["event"], e.get("key")) for e in self._events(capsys)
-        ]
+        assert ("failed", "summarizing") in [(e["event"], e.get("key")) for e in self._events(capsys)]
 
     def test_events_are_one_object_per_line(self, capsys, monkeypatch):
         """A consumer reads line-by-line; a multi-line object would break framing."""
@@ -295,3 +291,51 @@ class TestProgressEvents:
 
         for line in capsys.readouterr().err.splitlines():
             json.loads(line)  # every line must parse standalone
+
+
+class TestFailureRendering:
+    """The drawing path must not report an interrupted step as done."""
+
+    @staticmethod
+    def _render(monkeypatch, body) -> str:
+        from ownscribe.progress import PipelineProgress
+
+        monkeypatch.delenv("OWNSCRIBE_PROGRESS_EVENTS", raising=False)
+        stderr = io.StringIO()
+        monkeypatch.setattr("sys.stderr", stderr)
+        with contextlib.suppress(RuntimeError), PipelineProgress(summarize=True) as p:
+            body(p)
+        return stderr.getvalue()
+
+    def test_interrupted_step_is_not_marked_done(self, monkeypatch):
+        """It used to print "✔ Transcribing done." right before the traceback."""
+
+        def body(p):
+            p.begin("transcribing")
+            raise RuntimeError("boom")
+
+        out = self._render(monkeypatch, body)
+
+        assert "Transcribing done." not in out
+        assert "Transcribing failed." in out
+
+    def test_explicit_failure_is_shown(self, monkeypatch):
+        """fail() dropped the step from _active, so it rendered as an empty circle."""
+
+        def body(p):
+            p.begin("summarizing")
+            p.fail("summarizing")
+
+        out = self._render(monkeypatch, body)
+
+        assert "Summarizing failed." in out
+
+    def test_a_clean_run_still_reports_done(self, monkeypatch):
+        def body(p):
+            p.begin("transcribing")
+            p.complete("transcribing")
+
+        out = self._render(monkeypatch, body)
+
+        assert "Transcribing done." in out
+        assert "failed" not in out

@@ -1378,8 +1378,9 @@ class TestConfigCoercion:
 
     def test_valid_config_still_loads(self, tmp_path, monkeypatch):
         cfg = self._load(
-            tmp_path, monkeypatch,
-            '[audio]\nmic = true\nsilence_timeout = 60\n'
+            tmp_path,
+            monkeypatch,
+            "[audio]\nmic = true\nsilence_timeout = 60\n"
             '[output]\nformat = "json"\n[summarization]\nbackend = "ollama"\n',
         )
 

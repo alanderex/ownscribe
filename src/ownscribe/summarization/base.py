@@ -162,8 +162,11 @@ class Summarizer(abc.ABC):
 
     @abc.abstractmethod
     def chat(
-        self, system_prompt: str, user_prompt: str,
-        json_mode: bool = False, json_schema: dict | None = None,
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        json_mode: bool = False,
+        json_schema: dict | None = None,
     ) -> str:
         """Send a chat completion request and return the response text."""
 

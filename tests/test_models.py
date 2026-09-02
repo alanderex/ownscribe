@@ -24,9 +24,7 @@ class TestFullText:
 class TestSpeakerText:
     def test_prefixes_on_speaker_change(self, diarized_transcript):
         assert diarized_transcript.speaker_text == (
-            "SPEAKER_00: Hi, let's get started.\n"
-            "SPEAKER_01: Sounds good.\n"
-            "SPEAKER_00: First topic is the budget."
+            "SPEAKER_00: Hi, let's get started.\nSPEAKER_01: Sounds good.\nSPEAKER_00: First topic is the budget."
         )
 
     def test_joins_consecutive_segments_of_same_speaker(self):

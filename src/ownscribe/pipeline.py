@@ -141,7 +141,7 @@ def _rename_output_dir(directory: Path, title_slug: str, *, force_name: str | No
     if force_name is not None:
         candidates = [force_name]
     elif m := _RUN_DIR_RE.match(directory.name):
-        candidates = _titled_names(*m.groups(), title_slug)
+        candidates = _titled_names(m.group(1), m.group(2), title_slug)
     else:
         # Pre-YYMMDD layout (or an already-titled directory): keep the old
         # append-a-suffix behaviour rather than reformatting someone's existing folder.
@@ -208,10 +208,9 @@ def _create_recorder(config: Config):
             err=True,
         )
 
-    device = config.audio.device or None
-    # Try to parse as int (device index)
-    if isinstance(device, str) and device.isdigit():
-        device = int(device)
+    name = config.audio.device or None
+    # A numeric string is a device index, not a device name.
+    device: str | int | None = int(name) if name is not None and name.isdigit() else name
     return SoundDeviceRecorder(device=device, silence_timeout=config.audio.silence_timeout)
 
 
@@ -228,7 +227,6 @@ def _create_transcriber(config: Config, progress=None):
         # nothing but segment start, text and speaker.
         need_word_timestamps=config.output.format == "json",
     )
-
 
 
 def _needs_model_download(config: Config) -> bool:
@@ -613,10 +611,7 @@ def run_summarize(config: Config, transcript_file: str) -> None:
         # Require the transcript to live in the output tree so summarizing a
         # transcript elsewhere cannot rename an unrelated audio directory whose
         # name happens to match.
-        if (
-            config.output.uses_separate_audio_dir
-            and old_out_dir.parent == config.output.resolved_dir
-        ):
+        if config.output.uses_separate_audio_dir and old_out_dir.parent == config.output.resolved_dir:
             audio_dir = config.output.resolved_audio_dir / old_out_dir.name
             if audio_dir.is_dir() and out_dir != old_out_dir:
                 _rename_output_dir(audio_dir, title_slug, force_name=out_dir.name)
@@ -739,9 +734,7 @@ def _do_transcribe_and_summarize(
             # successfully.
             if config.output.uses_separate_audio_dir and audio_dir != old_out_dir:
                 if out_dir != old_out_dir:
-                    audio_dir = _rename_output_dir(
-                        audio_dir, title_slug, force_name=out_dir.name
-                    )
+                    audio_dir = _rename_output_dir(audio_dir, title_slug, force_name=out_dir.name)
             # Otherwise the audio follows out_dir: adjust audio_dir and
             # audio_path according to the new name of out_dir.
             else:
@@ -831,8 +824,10 @@ def run_resume(config: Config, directory: str) -> None:
         click.echo(f"Found transcript: {transcript}")
         click.echo("Resuming: summarize only.\n")
         run_summarize(config, str(transcript))
-    else:
+    elif audio:
         # Have audio, missing transcript (and summary) — full transcribe + summarize
+        # `elif audio` rather than `else`: the guard above proves one of the two is
+        # set, but stating it keeps the Optional out of the call below.
         click.echo(f"Found audio: {audio}")
         click.echo("Resuming: transcribe + summarize.\n")
         _do_transcribe_and_summarize(config, audio, dir_path)

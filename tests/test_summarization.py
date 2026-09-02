@@ -1040,7 +1040,9 @@ class TestReduceIsTemplateAgnostic:
         }
         config = SummarizationConfig(context_size=1000, template="vibes")
         summarizer = _RecordingSummarizer(
-            config, templates, replies=["## Vibes\n- upbeat\n\n## Snacks\n- chips"],
+            config,
+            templates,
+            replies=["## Vibes\n- upbeat\n\n## Snacks\n- chips"],
         )
 
         summarizer.summarize(_transcript(3000))

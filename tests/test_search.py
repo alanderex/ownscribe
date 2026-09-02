@@ -45,8 +45,11 @@ class FakeSummarizer:
         return estimate_tokens(text)
 
     def chat(
-        self, system_prompt: str, user_prompt: str,
-        json_mode: bool = False, json_schema: dict | None = None,
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        json_mode: bool = False,
+        json_schema: dict | None = None,
     ) -> str:
         self.calls.append((system_prompt, user_prompt, json_mode))
         if self._responses:
@@ -167,7 +170,7 @@ class TestBuildSummaryChunks:
         for i in range(5):
             _make_meeting_dir(
                 tmp_path,
-                f"2026-02-{10+i:02d}_1000_meeting-{i}",
+                f"2026-02-{10 + i:02d}_1000_meeting-{i}",
                 "x" * 2000,  # 500 tokens each
             )
 
@@ -183,7 +186,7 @@ class TestBuildSummaryChunks:
         for i in range(3):
             _make_meeting_dir(
                 tmp_path,
-                f"2026-02-{10+i:02d}_1000_meeting-{i}",
+                f"2026-02-{10 + i:02d}_1000_meeting-{i}",
                 "Short summary",
             )
 
@@ -257,7 +260,8 @@ class TestKeywordFallback:
 
     def test_match_on_transcript_only(self, tmp_path):
         _make_meeting_dir(
-            tmp_path, "2026-02-13_1501_quarterly-planning",
+            tmp_path,
+            "2026-02-13_1501_quarterly-planning",
             "Generic meeting notes",  # summary has no useful keywords
             "Alice discussed the infrastructure migration timeline",  # transcript does
         )
@@ -305,7 +309,7 @@ class TestFindRelevantMeetings:
         for i in range(5):
             _make_meeting_dir(
                 tmp_path,
-                f"2026-02-{10+i:02d}_1000_meeting-{i}",
+                f"2026-02-{10 + i:02d}_1000_meeting-{i}",
                 "x" * 2000,
             )
 
@@ -364,7 +368,10 @@ class TestFindRelevantMeetingsKeywordFallback:
         fake = FakeSummarizer(['{"relevant": []}'])
 
         result = _find_relevant_meetings(
-            fake, "infrastructure migration", meetings, 100000,
+            fake,
+            "infrastructure migration",
+            meetings,
+            100000,
         )
         assert len(result) == 1
         assert result[0].folder_name == "2026-02-13_1501_quarterly-planning"
@@ -440,7 +447,7 @@ class TestAnswerFromTranscripts:
 
 class TestVerifyQuotes:
     def test_phrase_match(self):
-        answer = '> The deadline for Q1 deliverables is March 15th but I think we should aim for March 10th'
+        answer = "> The deadline for Q1 deliverables is March 15th but I think we should aim for March 10th"
         transcripts = {
             "meeting-1": (
                 "The deadline for Q1 deliverables is March 15th but I think"
@@ -451,7 +458,7 @@ class TestVerifyQuotes:
         assert "[unverified]" not in result
 
     def test_not_found(self):
-        answer = '> The completely fabricated quote that does not exist in any transcript at all'
+        answer = "> The completely fabricated quote that does not exist in any transcript at all"
         transcripts = {
             "meeting-1": "Alice: Let's discuss the budget.\nBob: Sure, sounds good.",
         }
@@ -460,8 +467,7 @@ class TestVerifyQuotes:
 
     def test_inline_quote_not_found(self):
         answer = (
-            'Anna said "The completely fabricated quote that does not'
-            ' exist in any transcript at all" in the meeting.'
+            'Anna said "The completely fabricated quote that does not exist in any transcript at all" in the meeting.'
         )
         transcripts = {
             "meeting-1": "Alice: Let's discuss the budget.\nBob: Sure, sounds good.",
@@ -544,8 +550,8 @@ class TestAskIntegration:
             "message": {
                 "role": "assistant",
                 "content": (
-                    'The deadline is March 15th.\n\n'
-                    '**2026-02-13 15:01 — Quarterly Planning**\n'
+                    "The deadline is March 15th.\n\n"
+                    "**2026-02-13 15:01 — Quarterly Planning**\n"
                     '- **Anna** [00:01:00]: "The deadline is March 15th."'
                 ),
             },
@@ -600,10 +606,12 @@ def _openai_ok_response(content: str) -> dict:
 
 def _openai_400_response() -> tuple[dict, int]:
     return (
-        {"error": {
-            "message": "'response_format.type' must be 'json_schema' or 'text'",
-            "type": "invalid_request_error",
-        }},
+        {
+            "error": {
+                "message": "'response_format.type' must be 'json_schema' or 'text'",
+                "type": "invalid_request_error",
+            }
+        },
         400,
     )
 
@@ -618,11 +626,13 @@ class TestOpenAIChatJsonModeFallback:
         ep = "/v1/chat/completions"
         # 1st attempt (json_object) → 400
         httpserver.expect_ordered_request(ep, method="POST").respond_with_json(
-            body_400, status=status_400,
+            body_400,
+            status=status_400,
         )
         # 2nd attempt (json_schema) → 400
         httpserver.expect_ordered_request(ep, method="POST").respond_with_json(
-            body_400, status=status_400,
+            body_400,
+            status=status_400,
         )
         # 3rd attempt (no response_format) → 200
         httpserver.expect_ordered_request(ep, method="POST").respond_with_json(
@@ -647,7 +657,8 @@ class TestOpenAIChatJsonModeFallback:
         ep = "/v1/chat/completions"
         # 1st attempt (json_object) → 400
         httpserver.expect_ordered_request(ep, method="POST").respond_with_json(
-            body_400, status=status_400,
+            body_400,
+            status=status_400,
         )
         # 2nd attempt (json_schema) → 200
         httpserver.expect_ordered_request(ep, method="POST").respond_with_json(

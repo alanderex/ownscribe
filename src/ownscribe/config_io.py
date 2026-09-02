@@ -81,23 +81,21 @@ def _coerce(section: str, field: str, type_str: str, raw: str) -> bool | int | s
             return True
         if low in ("false", "0", "no", "off"):
             return False
-        raise ValueError(
-            f"{section}.{field} expects a boolean (true/false), got {raw!r}"
-        )
+        raise ValueError(f"{section}.{field} expects a boolean (true/false), got {raw!r}")
     if type_str == "int":
         try:
             return int(raw)
         except ValueError:
-            raise ValueError(
-                f"{section}.{field} expects an integer, got {raw!r}"
-            ) from None
+            raise ValueError(f"{section}.{field} expects an integer, got {raw!r}") from None
     # Everything else is a plain string.
     return raw
 
 
 def _field_types(section_cls: type) -> dict[str, str]:
     """Map a section dataclass's field names to their annotation strings."""
-    return {f.name: f.type for f in dataclasses.fields(section_cls)}
+    # dataclasses.Field.type is a str under `from __future__ import
+    # annotations`, but is typed as `type | str`; normalise it.
+    return {f.name: f.type if isinstance(f.type, str) else str(f.type) for f in dataclasses.fields(section_cls)}
 
 
 def set_config_value(key: str, value: str) -> Path:
@@ -109,9 +107,7 @@ def set_config_value(key: str, value: str) -> Path:
     written.
     """
     if "." not in key:
-        raise ValueError(
-            f"Key must be 'section.field' (e.g. summarization.backend), got {key!r}"
-        )
+        raise ValueError(f"Key must be 'section.field' (e.g. summarization.backend), got {key!r}")
     section, _, field = key.partition(".")
 
     if section not in _SECTIONS:
@@ -121,9 +117,7 @@ def set_config_value(key: str, value: str) -> Path:
     field_types = _field_types(_SECTIONS[section])
     if field not in field_types:
         valid = ", ".join(sorted(field_types))
-        raise ValueError(
-            f"Unknown key {field!r} in [{section}]. Valid keys: {valid}"
-        )
+        raise ValueError(f"Unknown key {field!r} in [{section}]. Valid keys: {valid}")
 
     coerced = _coerce(section, field, field_types[field], value)
 

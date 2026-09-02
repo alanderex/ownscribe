@@ -114,9 +114,7 @@ def _stop_with_stderr(stderr_text: str, capsys):
     recorder = _make_recorder()
     process = mock.Mock()
     process.poll.return_value = 0  # already exited: skip the signal/wait dance
-    process.stderr.readline.side_effect = [
-        line.encode() + b"\n" for line in stderr_text.splitlines()
-    ] + [b""]
+    process.stderr.readline.side_effect = [line.encode() + b"\n" for line in stderr_text.splitlines()] + [b""]
     recorder._process = process
     recorder._stderr_chunks = []
     recorder._drain_stderr(process.stderr)

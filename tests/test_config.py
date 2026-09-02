@@ -115,11 +115,7 @@ class TestMergeToml:
 
     def test_user_templates_partial(self):
         cfg = Config()
-        data = {
-            "templates": {
-                "quick": {"prompt": "Summarize briefly: {transcript}"}
-            }
-        }
+        data = {"templates": {"quick": {"prompt": "Summarize briefly: {transcript}"}}}
         merged = _merge_toml(cfg, data)
         assert merged.templates["quick"].system_prompt == ""
         assert merged.templates["quick"].prompt == "Summarize briefly: {transcript}"
@@ -155,8 +151,10 @@ class TestEnsureConfigFile:
     def test_creates_file_when_missing(self, tmp_path):
         config_dir = tmp_path / "ownscribe"
         config_path = config_dir / "config.toml"
-        with mock.patch("ownscribe.config.CONFIG_DIR", config_dir), \
-             mock.patch("ownscribe.config.CONFIG_PATH", config_path):
+        with (
+            mock.patch("ownscribe.config.CONFIG_DIR", config_dir),
+            mock.patch("ownscribe.config.CONFIG_PATH", config_path),
+        ):
             result = ensure_config_file()
         assert result.exists()
         assert "[audio]" in result.read_text()
@@ -166,8 +164,10 @@ class TestEnsureConfigFile:
         config_dir.mkdir()
         config_path = config_dir / "config.toml"
         config_path.write_text("# custom config\n")
-        with mock.patch("ownscribe.config.CONFIG_DIR", config_dir), \
-             mock.patch("ownscribe.config.CONFIG_PATH", config_path):
+        with (
+            mock.patch("ownscribe.config.CONFIG_DIR", config_dir),
+            mock.patch("ownscribe.config.CONFIG_PATH", config_path),
+        ):
             ensure_config_file()
         assert config_path.read_text() == "# custom config\n"
 

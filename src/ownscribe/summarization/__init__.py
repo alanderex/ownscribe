@@ -23,10 +23,7 @@ def create_summarizer(config: Config) -> Summarizer:
     """Create the appropriate summarizer based on config."""
     backend = config.summarization.backend
     if backend not in KNOWN_BACKENDS:
-        raise ValueError(
-            f"Unknown summarization backend {backend!r}. "
-            f"Expected one of: {', '.join(KNOWN_BACKENDS)}."
-        )
+        raise ValueError(f"Unknown summarization backend {backend!r}. Expected one of: {', '.join(KNOWN_BACKENDS)}.")
     if backend == "local":
         from ownscribe.summarization.llama_cpp_summarizer import LlamaCppSummarizer
 
@@ -42,6 +39,5 @@ def create_summarizer(config: Config) -> Summarizer:
     except ImportError as exc:
         hint = _INSTALL_HINTS.get(backend, f"uv add 'ownscribe[{backend}]'")
         raise ImportError(
-            f"The '{backend}' summarization backend requires additional dependencies.\n"
-            f"Install with: {hint}"
+            f"The '{backend}' summarization backend requires additional dependencies.\nInstall with: {hint}"
         ) from exc
