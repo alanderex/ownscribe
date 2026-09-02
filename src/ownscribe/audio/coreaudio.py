@@ -27,11 +27,18 @@ _BINARY_CANDIDATES = [
 ]
 
 _CACHE_DIR = Path.home() / ".local" / "share" / "ownscribe" / "bin"
-# Upstream (paberr) is deliberate, not a leftover from forking: swift/ here is kept
-# byte-identical to upstream, so their released ownscribe-audio is built from exactly this
-# source and carries the same fixes. Repointing this at a fork that publishes no releases
-# would 404 and break system-audio capture entirely. If swift/ ever diverges from upstream,
-# this must change to a fork release at the same time.
+# Upstream (paberr) publishes the only prebuilt helper, so this stays pointed there.
+#
+# CAUTION: swift/ is no longer byte-identical to upstream. It carries an RMS-based
+# silence measure that upstream's peak-based one lacks, so a *downloaded* helper will
+# not auto-stop on silence in a normal room (peak treats a single keystroke as sound
+# and resets the timer). Until that lands upstream, build the helper locally:
+#
+#     bash swift/build.sh
+#     cp bin/ownscribe-audio ~/.local/share/ownscribe/bin/ownscribe-audio
+#
+# _find_binary checks that cache directory before falling back to this download, so a
+# locally built helper wins for every app and venv on the machine.
 _DOWNLOAD_URL = "https://github.com/paberr/ownscribe/releases/latest/download/ownscribe-audio-{arch}"
 
 # Releases only ever publish ownscribe-audio-arm64.

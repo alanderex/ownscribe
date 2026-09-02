@@ -30,6 +30,30 @@ func computePeakLevel(in channelData: UnsafePointer<UnsafeMutablePointer<Float>>
     return peak
 }
 
+/// Root-mean-square level of a buffer — the measure used to decide "is this silence?".
+///
+/// Peak is the wrong tool for that question: it reports the single loudest sample, so
+/// one keystroke, breath or chair creak in an otherwise quiet room pushes a whole
+/// buffer over the threshold and resets the silence timer. Measured on a real 8-minute
+/// test recording the crest factor was ~3.9x, and the longest stretch the peak measure
+/// called quiet was 32s — against a 300s timeout that meant auto-stop could never fire
+/// in a normal room. The same threshold against RMS yielded 318s and stopped correctly.
+///
+/// Peak is still the right measure for "did we capture anything at all" (the
+/// permission/silence warning), where a single non-zero sample is the signal.
+func computeRMSLevel(in channelData: UnsafePointer<UnsafeMutablePointer<Float>>,
+                     channels: Int, frames: Int) -> Float {
+    guard frames > 0, channels > 0 else { return 0 }
+    var sum: Double = 0
+    for ch in 0..<channels {
+        for i in 0..<frames {
+            let v = Double(channelData[ch][i])
+            sum += v * v
+        }
+    }
+    return Float((sum / Double(channels * frames)).squareRoot())
+}
+
 // MARK: - Mic Capture via AVAudioEngine
 
 class MicCapture {
@@ -164,12 +188,14 @@ class MicCapture {
                     memset(channelData[ch], 0, frames * MemoryLayout<Float>.size)
                 }
             }
-            // Track peak level for silence timeout (muted mic = silence)
+            // Track level for silence timeout (muted mic = silence). RMS, not peak:
+            // a single transient in a quiet room would otherwise keep resetting the
+            // timer, so auto-stop never fired.
             if !muted, let channelData = buffer.floatChannelData {
-                let peak = computePeakLevel(in: channelData,
+                let level = computeRMSLevel(in: channelData,
                                      channels: Int(buffer.format.channelCount),
                                      frames: Int(buffer.frameLength))
-                if peak > kMicLoudThreshold {
+                if level > kMicLoudThreshold {
                     os_unfair_lock_lock(&self._lastLoudTimeLock)
                     self._lastLoudTime = DispatchTime.now().uptimeNanoseconds
                     os_unfair_lock_unlock(&self._lastLoudTimeLock)
@@ -582,9 +608,13 @@ class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, SCContentS
             computePeakLevel(in: $0, channels: Int(pcmBuffer.format.channelCount), frames: Int(pcmBuffer.frameLength))
         } ?? 0.0
         if bufferPeak > self.peakLevel { self.peakLevel = bufferPeak }
+        let bufferRMS: Float = pcmBuffer.floatChannelData.map {
+            computeRMSLevel(in: $0, channels: Int(pcmBuffer.format.channelCount), frames: Int(pcmBuffer.frameLength))
+        } ?? 0.0
 
-        // Update last loud time for silence timeout
-        if bufferPeak > kSystemLoudThreshold {
+        // Update last loud time for silence timeout. RMS for the same reason as the
+        // mic path; bufferPeak is still used below for the "captured nothing" warning.
+        if bufferRMS > kSystemLoudThreshold {
             os_unfair_lock_lock(&lastLoudTimeLock)
             lastLoudTime = DispatchTime.now().uptimeNanoseconds
             os_unfair_lock_unlock(&lastLoudTimeLock)
