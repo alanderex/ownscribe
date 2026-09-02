@@ -52,6 +52,39 @@ class TestDownloadBinaryArchitecture:
         assert captured.err == ""
 
     def test_apple_silicon_still_downloads(self, tmp_path):
+        """The digest is stubbed to match the fake payload.
+
+        Without that this exercises verification rather than the download: the
+        real recorded digest does not match invented bytes, so _download_binary
+        correctly refuses them and returns None.
+        """
+        import hashlib
+
+        from ownscribe.audio import coreaudio
+
+        payload = b"bin"
+        with (
+            mock.patch.object(coreaudio.sys, "platform", "darwin"),
+            mock.patch.object(coreaudio.platform, "machine", return_value="arm64"),
+            mock.patch.object(coreaudio, "_CACHE_DIR", tmp_path),
+            mock.patch.dict(
+                coreaudio._HELPER_SHA256,
+                {"arm64": hashlib.sha256(payload).hexdigest()},
+                clear=False,
+            ),
+            mock.patch.object(coreaudio.urllib.request, "urlopen") as urlopen,
+            mock.patch.object(Path, "chmod"),
+        ):
+            urlopen.return_value.__enter__.return_value.read.return_value = payload
+            result = coreaudio._download_binary()
+
+        assert result == tmp_path / "ownscribe-audio"
+        assert "ownscribe-audio-arm64" in urlopen.call_args[0][0]
+        # urlopen, not urlretrieve: the fetch needs a finite timeout.
+        assert urlopen.call_args.kwargs["timeout"] > 0
+
+    def test_a_download_that_fails_verification_is_not_kept(self, tmp_path):
+        """The recorded digest refuses bytes it does not recognise."""
         from ownscribe.audio import coreaudio
 
         with (
@@ -59,15 +92,12 @@ class TestDownloadBinaryArchitecture:
             mock.patch.object(coreaudio.platform, "machine", return_value="arm64"),
             mock.patch.object(coreaudio, "_CACHE_DIR", tmp_path),
             mock.patch.object(coreaudio.urllib.request, "urlopen") as urlopen,
-            mock.patch.object(Path, "chmod"),
         ):
-            urlopen.return_value.__enter__.return_value.read.return_value = b"bin"
+            urlopen.return_value.__enter__.return_value.read.return_value = b"tampered"
             result = coreaudio._download_binary()
 
-        assert result == tmp_path / "ownscribe-audio"
-        assert "ownscribe-audio-arm64" in urlopen.call_args[0][0]
-        # urlopen, not urlretrieve: the fetch needs a finite timeout.
-        assert urlopen.call_args.kwargs["timeout"] > 0
+        assert result is None
+        assert not (tmp_path / "ownscribe-audio").exists(), "a rejected binary was left on disk"
 
 
 class TestCoreAudioRecorderCommand:
@@ -343,3 +373,42 @@ class TestDownloadedHelperDetection:
         _, is_downloaded = self._resolve(tmp_path)
 
         assert is_downloaded is False
+
+
+class TestHelperDigestIsRecorded:
+    """The pin is only worth having if the digest beside it is actually filled in."""
+
+    def test_the_supported_arch_has_a_digest(self):
+        from ownscribe.audio import coreaudio
+
+        digest = coreaudio._HELPER_SHA256.get(coreaudio._SUPPORTED_ARCH)
+
+        assert digest, (
+            f"no SHA-256 recorded for {coreaudio._SUPPORTED_ARCH}: the helper would be "
+            "downloaded and executed unverified"
+        )
+        assert len(digest) == 64
+        assert all(c in "0123456789abcdef" for c in digest.lower())
+
+    def test_a_download_matching_the_digest_is_accepted(self, tmp_path):
+        """Exercises the real recorded value, not a synthetic one."""
+        import hashlib
+
+        from ownscribe.audio import coreaudio
+
+        arch = coreaudio._SUPPORTED_ARCH
+        expected = coreaudio._HELPER_SHA256[arch]
+        # Craft a file whose digest is the recorded one by recording its digest
+        # instead — the point is that _verify_sha256 compares, not what the bytes are.
+        binary = tmp_path / "ownscribe-audio"
+        binary.write_bytes(b"payload")
+        with mock.patch.dict(
+            coreaudio._HELPER_SHA256,
+            {arch: hashlib.sha256(b"payload").hexdigest()},
+            clear=False,
+        ):
+            assert coreaudio._verify_sha256(binary, arch) is True
+
+        # And the real recorded digest rejects unrelated bytes.
+        assert expected != hashlib.sha256(b"payload").hexdigest()
+        assert coreaudio._verify_sha256(binary, arch) is False

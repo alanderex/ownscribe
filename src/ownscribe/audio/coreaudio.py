@@ -40,12 +40,16 @@ _HELPER_RELEASE = "v0.15.0"
 _DOWNLOAD_URL = f"https://github.com/paberr/ownscribe/releases/download/{_HELPER_RELEASE}/ownscribe-audio-{{arch}}"
 
 # SHA-256 of each published asset, verified after download and before chmod +x.
-# Fill in by downloading the asset once and recording `shasum -a 256`; an entry
-# that is absent means the binary cannot be verified, and _download_binary says so
-# rather than pretending otherwise.
-_HELPER_SHA256: dict[str, str] = {
-    # "arm64": "<sha256 of ownscribe-audio-arm64 at _HELPER_RELEASE>",
-}
+# A mismatch refuses the binary outright; an absent entry cannot be verified, so
+# _download_binary says so rather than pretending otherwise.
+#
+# Re-record whenever _HELPER_RELEASE changes — the two are a pair, and a digest
+# left behind from an older release turns every download into a refusal:
+#
+#   curl -fsSL -o /tmp/oa \
+#     "https://github.com/paberr/ownscribe/releases/download/$REL/ownscribe-audio-arm64"
+#   shasum -a 256 /tmp/oa
+_HELPER_SHA256: dict[str, str] = {"arm64": "461f2257b6e7354cf3987c31f75398254973f9229e2dd9bada22f338dd8439ac"}
 
 # CAUTION: swift/ is no longer byte-identical to upstream. It carries an RMS-based
 # silence measure that upstream's peak-based one lacks, so a downloaded helper will
