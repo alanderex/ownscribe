@@ -30,13 +30,8 @@ _MODEL_REGISTRY: dict[str, tuple[str, str]] = {
 }
 
 
-def _ensure_model(
-    model_name: str,
-    on_progress: Callable[[DownloadProgressEvent], None] | None = None,
-) -> Path:
-    """Download the GGUF model if not already cached. Returns the local path."""
-    from huggingface_hub import hf_hub_download
-
+def _resolve_model_ref(model_name: str) -> tuple[str, str] | Path:
+    """Resolve a model name to (repo_id, filename), or a local path for a direct file."""
     if model_name.startswith("hf:"):
         # Format: "hf:owner/repo/filename.gguf"
         parts = model_name[3:]  # strip "hf:"
@@ -45,20 +40,51 @@ def _ensure_model(
             raise ValueError(
                 f"Invalid HuggingFace model spec '{model_name}'. Expected format: hf:owner/repo/filename.gguf"
             )
-        repo_id = parts[:slash_idx]
-        filename = parts[slash_idx + 1 :]
-    elif model_name in _MODEL_REGISTRY:
-        repo_id, filename = _MODEL_REGISTRY[model_name]
-    else:
-        # Treat as a direct path to a GGUF file
-        path = Path(model_name).expanduser()
-        if path.exists():
-            return path
-        raise FileNotFoundError(
-            f"Unknown model '{model_name}'. "
-            f"Available: {', '.join(_MODEL_REGISTRY)}, "
-            "a path to a GGUF file, or hf:owner/repo/filename.gguf"
-        )
+        return parts[:slash_idx], parts[slash_idx + 1 :]
+    if model_name in _MODEL_REGISTRY:
+        return _MODEL_REGISTRY[model_name]
+    # Treat as a direct path to a GGUF file
+    path = Path(model_name).expanduser()
+    if path.exists():
+        return path
+    raise FileNotFoundError(
+        f"Unknown model '{model_name}'. "
+        f"Available: {', '.join(_MODEL_REGISTRY)}, "
+        "a path to a GGUF file, or hf:owner/repo/filename.gguf"
+    )
+
+
+def is_model_cached(model_name: str) -> bool:
+    """True when the model is already on disk, so no download will happen.
+
+    Lets the caller skip showing a "Downloading model" step for a cached model —
+    the step used to appear on every run and looked like a repeated download.
+    """
+    try:
+        ref = _resolve_model_ref(model_name)
+    except (FileNotFoundError, ValueError):
+        return False
+    if isinstance(ref, Path):
+        return True
+    try:
+        from huggingface_hub import try_to_load_from_cache
+    except ImportError:
+        return False
+    repo_id, filename = ref
+    return isinstance(try_to_load_from_cache(repo_id=repo_id, filename=filename), str)
+
+
+def _ensure_model(
+    model_name: str,
+    on_progress: Callable[[DownloadProgressEvent], None] | None = None,
+) -> Path:
+    """Download the GGUF model if not already cached. Returns the local path."""
+    from huggingface_hub import hf_hub_download
+
+    ref = _resolve_model_ref(model_name)
+    if isinstance(ref, Path):
+        return ref
+    repo_id, filename = ref
 
     try:
         if on_progress is not None:

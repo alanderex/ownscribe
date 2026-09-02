@@ -224,6 +224,26 @@ def _create_transcriber(config: Config, progress=None):
     )
 
 
+
+def _needs_model_download(config: Config) -> bool:
+    """True when a local summarization model still has to be fetched.
+
+    The "Downloading model" step used to be shown whenever the local backend was
+    selected, cached or not. Behind the old indeterminate spinner that was
+    invisible; with a real progress checklist it reads as re-downloading a model
+    that is already on disk.
+    """
+    if not (config.summarization.enabled and config.summarization.backend == "local"):
+        return False
+    try:
+        from ownscribe.summarization.llama_cpp_summarizer import is_model_cached
+
+        return not is_model_cached(config.summarization.model)
+    except Exception:
+        # Never let a cache probe decide whether the pipeline can run.
+        return True
+
+
 def _download_summarization_model(
     model_name: str,
     progress: PipelineProgress,
@@ -423,7 +443,7 @@ def run_warmup(config: Config) -> None:
         summarize=False,
         transcribe=False,
         include_prepare=True,
-        download_summarizer=local_sum,
+        download_summarizer=_needs_model_download(config),
     ) as progress:
         try:
             transcriber = _create_transcriber(config, progress=progress)
@@ -523,7 +543,7 @@ def run_summarize(config: Config, transcript_file: str) -> None:
             transcribe=False,
             diarize=False,
             summarize=True,
-            download_summarizer=local_sum,
+            download_summarizer=_needs_model_download(config),
         ) as progress:
             progress.begin("summarizing")
             if local_sum:
@@ -596,7 +616,7 @@ def _do_transcribe_and_summarize(
     with PipelineProgress(
         diarize=diar_enabled,
         summarize=sum_enabled,
-        download_summarizer=local_sum,
+        download_summarizer=_needs_model_download(config),
     ) as progress:
         try:
             transcriber = _create_transcriber(config, progress=progress)
