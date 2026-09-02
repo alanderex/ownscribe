@@ -110,6 +110,12 @@ def _get_output_dir(config: Config, title: str | None = None) -> Path:
         # same minute). Fall through to the plain timestamp rather than reusing a
         # directory that already holds another meeting.
 
+    # Not exist_ok=True: a second run starting in the same minute would otherwise
+    # adopt the first run's directory and overwrite its recording and transcript.
+    # Seconds disambiguate; the plain HHMM name is still preferred.
+    claimed = _claim_dir(base, [f"{date_part}-{time_part}", f"{date_part}-{time_part}{now:%S}"])
+    if claimed is not None:
+        return claimed
     out_dir = base / f"{date_part}-{time_part}"
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
@@ -299,8 +305,25 @@ def _generate_title_slug(summary: str, summarizer) -> str:
         return ""
 
 
+def _validate_backends(config: Config) -> None:
+    """Reject unusable backend names before anything is recorded.
+
+    The summarizer is constructed in _do_transcribe_and_summarize, i.e. after the
+    meeting is over, so a typo in config.toml used to cost the user the whole
+    recording before surfacing.
+    """
+    from ownscribe.summarization import KNOWN_BACKENDS
+
+    if config.summarization.enabled and config.summarization.backend not in KNOWN_BACKENDS:
+        raise click.ClickException(
+            f"Unknown summarization backend {config.summarization.backend!r}. "
+            f"Expected one of: {', '.join(KNOWN_BACKENDS)}."
+        )
+
+
 def run_pipeline(config: Config, title: str | None = None) -> None:
     """Run the full pipeline: record, transcribe, summarize, output."""
+    _validate_backends(config)
     out_dir = _get_output_dir(config, title)
     audio_dir = _get_output_audio_dir(config, out_dir)
     audio_path = audio_dir / "recording.wav"
@@ -569,9 +592,18 @@ def run_summarize(config: Config, transcript_file: str) -> None:
     finally:
         summarizer.close()
 
-    summary_md = format_summary(summary)
-    summary_path = out_dir / "summary.md"
-    summary_path.write_text(summary_md)
+    # Honour output.format: the main pipeline writes summary.json for JSON output,
+    # so summarize/resume writing markdown to summary.md left a mixed directory.
+    if config.output.format == "json":
+        from ownscribe.output.json_output import format_summary_json
+
+        summary_md = format_summary(summary)  # console still shows the readable form
+        summary_ext, summary_body = "json", format_summary_json(summary)
+    else:
+        summary_md = format_summary(summary)
+        summary_ext, summary_body = "md", summary_md
+    summary_path = out_dir / f"summary.{summary_ext}"
+    summary_path.write_text(summary_body)
 
     if title_slug:
         out_dir, old_out_dir = _rename_output_dir(out_dir, title_slug), out_dir
@@ -589,7 +621,7 @@ def run_summarize(config: Config, transcript_file: str) -> None:
             if audio_dir.is_dir() and out_dir != old_out_dir:
                 _rename_output_dir(audio_dir, title_slug, force_name=out_dir.name)
 
-    summary_path = out_dir / "summary.md"
+    summary_path = out_dir / f"summary.{summary_ext}"
 
     click.echo(f"\n{summary_md}")
     click.echo(f"Summary saved to {summary_path}")
@@ -739,7 +771,9 @@ def _find_audio(directory: Path) -> Path | None:
     recording = directory / "recording.wav"
     if recording.exists():
         return recording
-    for f in directory.iterdir():
+    # sorted(): iterdir() is filesystem order, so a folder holding two media files
+    # would resume a different one on different machines.
+    for f in sorted(directory.iterdir()):
         if f.is_file() and f.suffix.lower() in _MEDIA_EXTENSIONS:
             return f
     return None

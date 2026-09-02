@@ -1171,9 +1171,11 @@ class TestRunDirectoryNaming:
     def test_blank_or_punctuation_only_title_falls_back_to_time(self, tmp_path):
         from ownscribe.pipeline import _get_output_dir
 
+        cfg = self._config(tmp_path)
         for title in ("", "   ", "!!!"):
-            out = _get_output_dir(self._config(tmp_path), title)
-            assert re.fullmatch(r"\d{6}-\d{4}", out.name), (title, out.name)
+            out = _get_output_dir(cfg, title)
+            # HHMM, or HHMMSS when an earlier run already claimed this minute.
+            assert re.fullmatch(r"\d{6}-\d{4}(\d{2})?", out.name), (title, out.name)
 
     def test_generated_title_replaces_the_time_on_rename(self, tmp_path):
         from ownscribe.pipeline import _rename_output_dir
@@ -1280,3 +1282,108 @@ class TestSecretPresenceReporting:
         data = config_to_dict(cfg, reveal_secrets=True)
 
         assert data["diarization"]["hf_token"] == "hf_realsecret"
+
+
+class TestReviewFixes:
+    """Findings from the external review of a6eb811."""
+
+    def test_untitled_runs_in_the_same_minute_do_not_share_a_directory(self, tmp_path):
+        """mkdir(exist_ok=True) let a second start overwrite the first recording."""
+        from ownscribe.config import Config
+        from ownscribe.pipeline import _get_output_dir
+
+        cfg = Config()
+        cfg.output.dir = str(tmp_path)
+        first = _get_output_dir(cfg)
+        (first / "recording.wav").write_text("first meeting")
+        second = _get_output_dir(cfg)
+
+        assert first != second
+        assert (first / "recording.wav").read_text() == "first meeting"
+
+    def test_find_audio_is_deterministic(self, tmp_path):
+        from ownscribe.pipeline import _find_audio
+
+        for name in ("b.mp4", "a.mp3", "c.mov"):
+            (tmp_path / name).write_text("x")
+
+        assert _find_audio(tmp_path).name == "a.mp3"
+
+    def test_unknown_summarizer_backend_fails_loudly(self):
+        """It used to fall through to Ollama and only fail after the meeting."""
+        import pytest
+
+        from ownscribe.config import Config
+        from ownscribe.summarization import create_summarizer
+
+        cfg = Config()
+        cfg.summarization.backend = "opneai"
+        with pytest.raises(ValueError, match="Unknown summarization backend"):
+            create_summarizer(cfg)
+
+    def test_bad_backend_is_rejected_before_recording(self):
+        import click
+        import pytest
+
+        from ownscribe.config import Config
+        from ownscribe.pipeline import _validate_backends
+
+        cfg = Config()
+        cfg.summarization.enabled = True
+        cfg.summarization.backend = "llama"
+        with pytest.raises(click.ClickException):
+            _validate_backends(cfg)
+
+
+class TestConfigCoercion:
+    """Hand-edited TOML went in untyped; `config set` coerced but load() did not."""
+
+    @staticmethod
+    def _load(tmp_path, monkeypatch, body: str):
+        from ownscribe import config as cfgmod
+
+        path = tmp_path / "config.toml"
+        path.write_text(body)
+        monkeypatch.setattr(cfgmod, "CONFIG_PATH", path)
+        return cfgmod.Config.load()
+
+    def test_string_false_is_not_truthy(self, tmp_path, monkeypatch):
+        """`mic = "false"` used to leave the microphone on."""
+        cfg = self._load(tmp_path, monkeypatch, '[audio]\nmic = "false"\n')
+
+        assert cfg.audio.mic is False
+
+    def test_numeric_string_is_coerced(self, tmp_path, monkeypatch):
+        cfg = self._load(tmp_path, monkeypatch, '[audio]\nsilence_timeout = "300"\n')
+
+        assert cfg.audio.silence_timeout == 300
+
+    def test_nonsense_value_is_rejected(self, tmp_path, monkeypatch):
+        import pytest
+
+        with pytest.raises(ValueError, match="silence_timeout"):
+            self._load(tmp_path, monkeypatch, '[audio]\nsilence_timeout = "soon"\n')
+
+    def test_invalid_enum_is_rejected(self, tmp_path, monkeypatch):
+        import pytest
+
+        with pytest.raises(ValueError, match="output.format"):
+            self._load(tmp_path, monkeypatch, '[output]\nformat = "yaml"\n')
+
+    def test_unknown_key_warns_instead_of_vanishing(self, tmp_path, monkeypatch, capsys):
+        cfg = self._load(tmp_path, monkeypatch, '[diarization]\nhf_tokn = "oops"\n')
+
+        assert "hf_tokn" in capsys.readouterr().err
+        assert cfg.diarization.hf_token == ""
+
+    def test_valid_config_still_loads(self, tmp_path, monkeypatch):
+        cfg = self._load(
+            tmp_path, monkeypatch,
+            '[audio]\nmic = true\nsilence_timeout = 60\n'
+            '[output]\nformat = "json"\n[summarization]\nbackend = "ollama"\n',
+        )
+
+        assert cfg.audio.mic is True
+        assert cfg.audio.silence_timeout == 60
+        assert cfg.output.format == "json"
+        assert cfg.summarization.backend == "ollama"

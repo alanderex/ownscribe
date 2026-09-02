@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import click
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -155,32 +156,66 @@ class Config:
         return config
 
 
+_ENUMS: dict[tuple[str, str], tuple[str, ...]] = {
+    ("audio", "backend"): ("coreaudio", "sounddevice"),
+    ("audio", "capture_mode"): ("all", "picker"),
+    ("summarization", "backend"): ("local", "ollama", "openai"),
+    ("output", "format"): ("markdown", "json"),
+    ("diarization", "device"): ("auto", "mps", "cpu"),
+}
+
+
+def _coerce(section: str, key: str, current, value):
+    """Coerce a TOML value to the field's declared type, or raise ValueError.
+
+    `config set` coerces; a hand-edited config.toml did not, so `mic = "false"`
+    stayed a truthy string (mic silently on) and `silence_timeout = "300"` blew up
+    much later inside a comparison.
+    """
+    want = type(current)
+    if isinstance(current, bool):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+            return value.strip().lower() == "true"
+        raise ValueError(f"{section}.{key} must be true or false, got {value!r}")
+    if isinstance(current, int) and not isinstance(value, bool):
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+            return int(value)
+        raise ValueError(f"{section}.{key} must be a whole number, got {value!r}")
+    if isinstance(current, str):
+        if not isinstance(value, str):
+            raise ValueError(f"{section}.{key} must be text, got {value!r}")
+        allowed = _ENUMS.get((section, key))
+        if allowed and value and value not in allowed:
+            raise ValueError(
+                f"{section}.{key} must be one of {', '.join(allowed)}, got {value!r}"
+            )
+        return value
+    if not isinstance(value, want):
+        raise ValueError(f"{section}.{key} must be {want.__name__}, got {value!r}")
+    return value
+
+
+def _merge_section(config: Config, data: dict, section: str) -> None:
+    """Merge one TOML section, coercing types and reporting unknown keys."""
+    if section not in data:
+        return
+    target = getattr(config, section)
+    for k, v in data[section].items():
+        if not hasattr(target, k):
+            # Silently dropping these meant a typo like `hf_tokn` did nothing at all.
+            click.echo(f"Warning: unknown config key {section}.{k} — ignored.", err=True)
+            continue
+        setattr(target, k, _coerce(section, k, getattr(target, k), v))
+
+
 def _merge_toml(config: Config, data: dict) -> Config:
     """Merge TOML data into config dataclass."""
-    if "audio" in data:
-        for k, v in data["audio"].items():
-            if hasattr(config.audio, k):
-                setattr(config.audio, k, v)
-
-    if "transcription" in data:
-        for k, v in data["transcription"].items():
-            if hasattr(config.transcription, k):
-                setattr(config.transcription, k, v)
-
-    if "diarization" in data:
-        for k, v in data["diarization"].items():
-            if hasattr(config.diarization, k):
-                setattr(config.diarization, k, v)
-
-    if "summarization" in data:
-        for k, v in data["summarization"].items():
-            if hasattr(config.summarization, k):
-                setattr(config.summarization, k, v)
-
-    if "output" in data:
-        for k, v in data["output"].items():
-            if hasattr(config.output, k):
-                setattr(config.output, k, v)
+    for section in ("audio", "transcription", "diarization", "summarization", "output"):
+        _merge_section(config, data, section)
 
     if "templates" in data:
         for name, t_data in data["templates"].items():

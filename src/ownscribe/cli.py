@@ -406,13 +406,23 @@ def cleanup(
         ]
         if audio_dir != output_dir:
             candidates.append(("Audio", audio_dir))
+        # --yes means "don't ask me about the targets I named", not "delete
+        # everything". Bare `cleanup -y` used to auto-confirm config, cache, output
+        # and audio in one go — every recording, transcript and summary — with no
+        # summary and no prompt. Require an explicit target instead.
+        if yes:
+            raise click.UsageError(
+                "cleanup --yes needs an explicit target: --all, --config, --cache, "
+                "or --output. Run `ownscribe cleanup` with no flags to choose "
+                "interactively."
+            )
         # Interactive: prompt for each directory
         for label, path in candidates:
             size = _dir_size(path)
             if size == "(not found)":
                 click.echo(f"  {label}: {path} — {size}, skipping")
                 continue
-            if yes or click.confirm(f"  Remove {label}: {path} ({size})?"):
+            if click.confirm(f"  Remove {label}: {path} ({size})?"):
                 targets.append((label, path))
         if not targets:
             click.echo("Nothing to remove.")
