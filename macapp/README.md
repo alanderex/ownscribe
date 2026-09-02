@@ -108,7 +108,11 @@ missing Screen Recording grant for the app.
   be bundled inside the `.app` and code-signed with the same Team ID. The
   unsigned, network-downloaded helper is also not signature/hash-verified
   (inherited from the CLI; out of scope for this UI).
-- **Silence auto-stop is disabled for GUI recordings** (`--silence-timeout 0`):
+- **Silence auto-stop follows your Settings value.** It used to be forced to
+  `--silence-timeout 0` because the app could not tell when capture ended; it now
+  watches the CLI's `recording_stopped` event, so the preference is honoured.
+  Note the helper decides "silence" by RMS — a downloaded (upstream) binary still
+  uses peak and will not auto-stop in a normal room. Historical note:
   you control Stop, which avoids the UI showing "Recording" while the pipeline
   has already begun transcribing. The CLI still honors `silence_timeout`.
 - **Quitting mid-recording** signals the pipeline to stop (releasing the mic /

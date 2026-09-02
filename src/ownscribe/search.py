@@ -98,25 +98,49 @@ def ask(config: Config, question: str, since: str | None, limit: int | None) -> 
 # -- Discovery --
 
 
-_FOLDER_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_(\d{2})(\d{2})(?:_(.+))?$")
+# Pre-YYMMDD layout, still on disk for anyone with older meetings.
+_LEGACY_FOLDER_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_(\d{2})(\d{2})(?:_(.+))?$")
+# Current layout: YYMMDD-HHMM, or YYMMDD-<slug> with an optional _HHMM collision
+# suffix. A slug never contains "_" (slugify strips it), which is what makes the
+# suffix unambiguous — see _titled_names in pipeline.py.
+_FOLDER_RE = re.compile(r"^(\d{2})(\d{2})(\d{2})-(.+)$")
 
 
 def _parse_folder_name(name: str) -> tuple[str, str] | None:
-    """Parse a folder name like '2026-02-13_1501_quarterly-planning'.
+    """Parse a meeting folder name into (date_str, display_name).
 
-    Also accepts folders without a slug, e.g. '2026-02-16_1433'.
-    Returns (date_str, display_name) or None if the name doesn't match.
+    Understands both layouts, because renaming the output directories must not
+    make every earlier meeting invisible to `ownscribe ask` — nor every newer one,
+    which is exactly what happened when only the legacy pattern was matched:
+    non-matching folders are skipped silently, so `ask` reported "No meetings
+    found" against a full output tree.
+
+    Returns None if the name is not a meeting folder at all.
     """
+    if m := _LEGACY_FOLDER_RE.match(name):
+        date_str = m.group(1)
+        hour, minute = m.group(2), m.group(3)
+        slug = m.group(4)
+        if slug:
+            return date_str, f"{date_str} {hour}:{minute} — {slug.replace('-', ' ').title()}"
+        return date_str, f"{date_str} {hour}:{minute}"
+
     m = _FOLDER_RE.match(name)
     if not m:
         return None
-    date_str = m.group(1)
-    hour, minute = m.group(2), m.group(3)
-    slug = m.group(4)
-    if slug:
+    yy, mm, dd, rest = m.groups()
+    date_str = f"20{yy}-{mm}-{dd}"
+
+    # Untitled run: the remainder is just HHMM.
+    if len(rest) == 4 and rest.isdigit():
+        return date_str, f"{date_str} {rest[:2]}:{rest[2:]}"
+
+    # Titled run, optionally with an _HHMM collision suffix.
+    slug, sep, suffix = rest.rpartition("_")
+    if sep and len(suffix) == 4 and suffix.isdigit():
         title = slug.replace("-", " ").title()
-        return date_str, f"{date_str} {hour}:{minute} — {title}"
-    return date_str, f"{date_str} {hour}:{minute}"
+        return date_str, f"{date_str} {suffix[:2]}:{suffix[2:]} — {title}"
+    return date_str, f"{date_str} — {rest.replace('-', ' ').title()}"
 
 
 def _discover_meetings(

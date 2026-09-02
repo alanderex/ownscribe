@@ -154,7 +154,7 @@ This will:
 1. Capture system audio and your microphone until you press Ctrl+C (or auto-stop after 5 minutes of silence); press `m` to mute/unmute the mic while recording
 2. Transcribe with WhisperX
 3. Summarize with your local LLM
-4. Save everything to `~/ownscribe/YYYY-MM-DD_HHMM/`, renamed to `~/ownscribe/YYYY-MM-DD_HHMM_meeting-title/` once the summary produces a title
+4. Save everything to `~/ownscribe/YYMMDD-HHMM/`, renamed to `~/ownscribe/YYMMDD-meeting-title/` once a title is known. Pass `--title` to name the folder up front; the summary supplies one otherwise. A second meeting with the same title on the same day keeps the time as a suffix (`260827-standup_1630`).
 
 > **Note:** By default, ownscribe records all system audio directly with no prompt. To show a macOS source picker on each launch instead, set `capture_mode = "picker"` in the `[audio]` config section.
 
@@ -186,7 +186,7 @@ ownscribe apps                     # list running apps with PIDs for use with --
 ownscribe warmup                   # prefetch WhisperX/pyannote models before a meeting
 ownscribe transcribe recording.wav # transcribe an audio or video file: wav/mp3/mp4/mov/mkv (saved alongside)
 ownscribe summarize transcript.md  # summarize a transcript (saves alongside the input)
-ownscribe resume ./2026-02-20_1736 # resume a partial run, or process a folder's audio/video recording
+ownscribe resume ./260220-1736    # resume a partial run, or process a folder's audio/video recording
 ownscribe ask "question"           # search your meetings with a natural-language question
 ownscribe list-speakers transcript.md                       # list diarized speaker labels (JSON)
 ownscribe rename-speakers transcript.md --map SPEAKER_00=Anna # name speakers in a transcript

@@ -662,3 +662,78 @@ class TestOpenAIChatJsonModeFallback:
         schema = {"name": "test", "strict": True, "schema": {"type": "object"}}
         result = summarizer.chat("system", "user", json_mode=True, json_schema=schema)
         assert "meeting-2" in result
+
+
+class TestFolderNameLayouts:
+    """`ask` must see meetings in both directory layouts.
+
+    Renaming output folders to YYMMDD-* made every new meeting invisible to
+    search: _parse_folder_name returned None and _discover_meetings skips
+    silently, so `ask` reported "No meetings found" against a full tree.
+    """
+
+    def test_current_untitled(self):
+        from ownscribe.search import _parse_folder_name
+
+        assert _parse_folder_name("260827-1400") == ("2026-08-27", "2026-08-27 14:00")
+
+    def test_current_titled(self):
+        from ownscribe.search import _parse_folder_name
+
+        date, label = _parse_folder_name("260827-q2-sales-review")
+        assert date == "2026-08-27"
+        assert "Q2 Sales Review" in label
+
+    def test_current_titled_with_collision_suffix(self):
+        from ownscribe.search import _parse_folder_name
+
+        date, label = _parse_folder_name("260827-standup_1630")
+        assert date == "2026-08-27"
+        assert "Standup" in label
+        assert "16:30" in label
+
+    def test_title_ending_in_digits_is_not_read_as_a_time(self):
+        from ownscribe.search import _parse_folder_name
+
+        date, label = _parse_folder_name("260827-budget-2026")
+        assert date == "2026-08-27"
+        assert "Budget 2026" in label
+
+    def test_legacy_layout_still_parses(self):
+        from ownscribe.search import _parse_folder_name
+
+        assert _parse_folder_name("2026-02-16_1433") == ("2026-02-16", "2026-02-16 14:33")
+        date, label = _parse_folder_name("2026-02-13_1501_quarterly-planning")
+        assert date == "2026-02-13"
+        assert "Quarterly Planning" in label
+
+    def test_non_meeting_folders_are_rejected(self):
+        from ownscribe.search import _parse_folder_name
+
+        for name in ("notes", "", "models", "2026-02-13"):
+            assert _parse_folder_name(name) is None
+
+    def test_discovery_finds_a_current_layout_meeting(self, tmp_path):
+        """End-to-end: the regression was in discovery, not just the parser."""
+        from ownscribe.search import _discover_meetings
+
+        d = tmp_path / "260827-q2-sales-review"
+        d.mkdir()
+        (d / "summary.md").write_text("# Summary\nWe discussed revenue.")
+        (d / "transcript.md").write_text("# Transcript\nRevenue is up.")
+
+        meetings, _ = _discover_meetings(tmp_path, since=None, limit=None)
+
+        assert [m.folder_name for m in meetings] == ["260827-q2-sales-review"]
+
+    def test_since_filter_uses_the_expanded_year(self, tmp_path):
+        from ownscribe.search import _discover_meetings
+
+        for name in ("260827-recent", "250827-old"):
+            d = tmp_path / name
+            d.mkdir()
+            (d / "summary.md").write_text("x")
+
+        meetings, _ = _discover_meetings(tmp_path, since="2026-01-01", limit=None)
+
+        assert [m.folder_name for m in meetings] == ["260827-recent"]
