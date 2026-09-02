@@ -7,6 +7,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import urllib.request
 from pathlib import Path
 
@@ -111,6 +112,8 @@ class CoreAudioRecorder(AudioRecorder):
         self._capture_mode = capture_mode
         self._silence_timeout = silence_timeout
         self._process: subprocess.Popen | None = None
+        self._stderr_chunks: list[bytes] = []
+        self._stderr_thread: threading.Thread | None = None
         self._binary = _find_binary()
         self._silence_warning: bool = False
         self._silence_timed_out: bool = False
@@ -135,12 +138,34 @@ class CoreAudioRecorder(AudioRecorder):
         if self._silence_timeout > 0:
             cmd.extend(["--silence-timeout", str(self._silence_timeout)])
 
+        # stdout is not piped: nothing reads it, and an unread pipe is a deadlock
+        # waiting to happen. stderr is piped but must be drained continuously — the
+        # helper writes status throughout a meeting, and stop() only read it after
+        # wait(), so a full ~64KB pipe blocked the helper forever on a long recording.
         self._process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             process_group=0,
         )
+        self._stderr_chunks = []
+        self._stderr_thread = threading.Thread(
+            target=self._drain_stderr, args=(self._process.stderr,), daemon=True
+        )
+        self._stderr_thread.start()
+
+    def _drain_stderr(self, stream) -> None:
+        """Read the helper's stderr until EOF so its pipe can never fill up."""
+        try:
+            for line in iter(stream.readline, b""):
+                # A real pipe always yields bytes and terminates at b"". A stand-in
+                # stream (a mocked Popen in the tests) yields objects that never
+                # compare equal to b"", which would spin here forever.
+                if not isinstance(line, bytes | bytearray):
+                    break
+                self._stderr_chunks.append(bytes(line))
+        except (ValueError, OSError):
+            pass  # stream closed underneath us during shutdown
 
     @property
     def silence_warning(self) -> bool:
@@ -177,8 +202,11 @@ class CoreAudioRecorder(AudioRecorder):
                 except subprocess.TimeoutExpired:
                     self._process.kill()
                     self._process.wait()
-        if self._process and self._process.stderr:
-            stderr_output = self._process.stderr.read().decode(errors="replace")
+        if self._process:
+            # The reader thread owns the pipe; join it so every line has arrived.
+            if self._stderr_thread is not None:
+                self._stderr_thread.join(timeout=5)
+            stderr_output = b"".join(self._stderr_chunks).decode(errors="replace")
             if stderr_output:
                 if "[SILENCE_WARNING]" in stderr_output:
                     self._silence_warning = True

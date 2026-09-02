@@ -102,12 +102,21 @@ class TestCoreAudioRecorderCommand:
 
 
 def _stop_with_stderr(stderr_text: str, capsys):
-    """Run stop() against a finished fake helper and return what reached the user."""
+    """Run stop() against a finished fake helper and return what reached the user.
+
+    stderr is consumed by a reader thread during capture (an unread pipe deadlocks
+    the helper on a long meeting), so the lines are fed through _drain_stderr rather
+    than stubbed onto a single read().
+    """
     recorder = _make_recorder()
     process = mock.Mock()
     process.poll.return_value = 0  # already exited: skip the signal/wait dance
-    process.stderr.read.return_value = stderr_text.encode()
+    process.stderr.readline.side_effect = [
+        line.encode() + b"\n" for line in stderr_text.splitlines()
+    ] + [b""]
     recorder._process = process
+    recorder._stderr_chunks = []
+    recorder._drain_stderr(process.stderr)
 
     recorder.stop()
     return capsys.readouterr().err, recorder
@@ -169,3 +178,40 @@ class TestHelperStderrFiltering:
         err, _ = _stop_with_stderr("Stream error: something went wrong\n", capsys)
 
         assert "Stream error: something went wrong" in err
+
+
+class TestStderrDraining:
+    """The helper's stderr must be read during capture, not after it exits.
+
+    Popen was given stdout=PIPE and stderr=PIPE and neither was read until stop()
+    called wait(). The Swift helper writes status throughout a meeting, so a full
+    ~64KB pipe blocked it forever on a long recording.
+    """
+
+    def test_stdout_is_not_piped(self, tmp_path):
+        import subprocess
+
+        with mock.patch("ownscribe.audio.coreaudio.subprocess.Popen") as popen:
+            _make_recorder().start(tmp_path / "recording.wav")
+
+        assert popen.call_args.kwargs["stdout"] is subprocess.DEVNULL
+
+    def test_a_reader_thread_drains_stderr_during_capture(self, tmp_path):
+        with mock.patch("ownscribe.audio.coreaudio.subprocess.Popen") as popen:
+            popen.return_value.stderr.readline.side_effect = [b"Recording x\n", b""]
+            recorder = _make_recorder()
+            recorder.start(tmp_path / "recording.wav")
+            recorder._stderr_thread.join(timeout=5)
+
+        assert recorder._stderr_chunks == [b"Recording x\n"]
+
+    def test_a_stream_that_never_ends_does_not_spin(self, tmp_path):
+        """A stand-in stream yields objects that never equal b"" — must not loop."""
+        recorder = _make_recorder()
+        recorder._stderr_chunks = []
+        stream = mock.Mock()
+        stream.readline.return_value = mock.Mock()  # never b""
+
+        recorder._drain_stderr(stream)  # returns rather than hanging
+
+        assert recorder._stderr_chunks == []

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import queue
 import threading
 import time as _time
 from pathlib import Path
@@ -34,6 +35,9 @@ class SoundDeviceRecorder(AudioRecorder):
         self._lock = threading.Lock()
         self._last_loud_time: float = 0.0
         self._timed_out: bool = False
+        self._queue: queue.Queue = queue.Queue()
+        self._writer: threading.Thread | None = None
+        self._writer_done = threading.Event()
 
     def is_available(self) -> bool:
         try:
@@ -55,15 +59,23 @@ class SoundDeviceRecorder(AudioRecorder):
             subtype="FLOAT",
         )
 
-        def callback(indata, frames, time, status):
-            with self._lock:
-                if self._file is not None:
-                    self._file.write(indata.copy())
+        self._queue = queue.Queue()
+        self._writer_done = threading.Event()
+        self._writer = threading.Thread(target=self._write_loop, daemon=True)
+        self._writer.start()
 
-            # Silence tracking
+        def callback(indata, frames, time, status):
+            # PortAudio calls this on a real-time thread. Writing to disk here — an
+            # allocation, a lock and a blocking write — glitches or drops audio when
+            # the disk stalls, so the buffer is only handed to a writer thread.
+            self._queue.put(indata.copy())
+
+            # Silence tracking. RMS, not peak, for the same reason as the Swift
+            # helper: a single transient would otherwise keep resetting the timer,
+            # so auto-stop never fired in a room with any noise floor at all.
             if self._silence_timeout > 0:
-                peak = np.max(np.abs(indata))
-                if peak > _SILENCE_THRESHOLD:
+                level = float(np.sqrt(np.mean(np.square(indata, dtype=np.float64))))
+                if level > _SILENCE_THRESHOLD:
                     self._last_loud_time = _time.monotonic()
                 elif _time.monotonic() - self._last_loud_time > self._silence_timeout:
                     self._timed_out = True
@@ -76,6 +88,17 @@ class SoundDeviceRecorder(AudioRecorder):
             callback=callback,
         )
         self._stream.start()
+
+    def _write_loop(self) -> None:
+        """Drain captured buffers to disk off the audio thread."""
+        while True:
+            chunk = self._queue.get()
+            if chunk is None:  # sentinel from stop()
+                self._writer_done.set()
+                return
+            with self._lock:
+                if self._file is not None:
+                    self._file.write(chunk)
 
     @property
     def is_recording(self) -> bool:
@@ -94,6 +117,12 @@ class SoundDeviceRecorder(AudioRecorder):
             self._stream.stop()
             self._stream.close()
             self._stream = None
+        # Drain before closing: buffers still queued would otherwise be dropped,
+        # truncating the end of every recording.
+        if self._writer is not None:
+            self._queue.put(None)
+            self._writer_done.wait(timeout=30)
+            self._writer = None
         with self._lock:
             if self._file is not None:
                 self._file.close()

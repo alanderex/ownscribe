@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
-import click
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import click
 
 CONFIG_DIR = Path("~/.config/ownscribe").expanduser()
 CONFIG_PATH = CONFIG_DIR / "config.toml"

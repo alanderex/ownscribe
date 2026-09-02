@@ -8,13 +8,18 @@ from ownscribe.config import SummarizationConfig
 from ownscribe.summarization.base import DEFAULT_CONTEXT_SIZE, Summarizer
 from ownscribe.summarization.prompts import clean_response
 
+#: Seconds. Generous enough for a slow local model, finite so a hung
+#: server cannot block the pipeline indefinitely.
+_HTTP_TIMEOUT = 600
+
 
 class OllamaSummarizer(Summarizer):
     """Summarizes transcripts using a local Ollama model."""
 
     def __init__(self, config: SummarizationConfig, templates: dict | None = None) -> None:
         super().__init__(config, templates)
-        self._client = ollama.Client(host=config.host)
+        # Without a timeout a wedged server hangs summarize and ask forever.
+        self._client = ollama.Client(host=config.host, timeout=_HTTP_TIMEOUT)
         self._probed_context_size: int | None = None
 
     @property

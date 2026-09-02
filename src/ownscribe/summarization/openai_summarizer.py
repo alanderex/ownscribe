@@ -8,6 +8,10 @@ from ownscribe.config import SummarizationConfig
 from ownscribe.summarization.base import Summarizer
 from ownscribe.summarization.prompts import clean_response
 
+#: Seconds. Generous enough for a slow local model, finite so a hung
+#: server cannot block the pipeline indefinitely.
+_HTTP_TIMEOUT = 600
+
 
 class OpenAISummarizer(Summarizer):
     """Summarizes transcripts using an OpenAI-compatible API."""
@@ -20,7 +24,8 @@ class OpenAISummarizer(Summarizer):
         # Most local servers ignore the key; servers that require auth (e.g. oMLX)
         # read it from config.api_key or the OPENAI_API_KEY env var.
         api_key = config.api_key or "not-needed"
-        self._client = openai.OpenAI(base_url=base_url, api_key=api_key)
+        # Without a timeout a wedged server hangs summarize and ask forever.
+        self._client = openai.OpenAI(base_url=base_url, api_key=api_key, timeout=_HTTP_TIMEOUT)
 
     def chat(
         self, system_prompt: str, user_prompt: str,

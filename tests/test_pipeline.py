@@ -1367,7 +1367,7 @@ class TestConfigCoercion:
     def test_invalid_enum_is_rejected(self, tmp_path, monkeypatch):
         import pytest
 
-        with pytest.raises(ValueError, match="output.format"):
+        with pytest.raises(ValueError, match=r"output\.format"):
             self._load(tmp_path, monkeypatch, '[output]\nformat = "yaml"\n')
 
     def test_unknown_key_warns_instead_of_vanishing(self, tmp_path, monkeypatch, capsys):
