@@ -49,8 +49,13 @@ final class OwnscribeCLI {
     /// Never move an existing tag. needsUpgrade compares this string against the one
     /// recorded beside the installed venv, so a moved tag leaves every existing
     /// install on the CLI it already had while claiming to be current. v0.15.1 was
-    /// moved several times during development; v0.15.2 is the first immutable one.
-    static let macappRelease = "macapp-v0.15.2"
+    /// moved several times during development; every tag from v0.15.2 on is fixed.
+    ///
+    /// Bump this whenever a Python-side change must reach installed apps — the tag
+    /// named here is what a menu-bar install actually runs, so a fix that is merged
+    /// but not tagged reaches nobody. v0.15.2 predates helper checksum verification;
+    /// v0.15.3 is the first tag that contains it.
+    static let macappRelease = "macapp-v0.15.3"
 
     private static let pipSpec =
         "ownscribe[all] @ git+https://github.com/alanderex/ownscribe@\(macappRelease)"
