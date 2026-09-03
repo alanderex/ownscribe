@@ -135,9 +135,11 @@ def _parse_folder_name(name: str) -> tuple[str, str] | None:
     yy, mm, dd, rest = m.groups()
     date_str = f"20{yy}-{mm}-{dd}"
 
-    # Untitled run: the remainder is just HHMM.
-    if len(rest) == 4 and rest.isdigit():
-        return date_str, f"{date_str} {rest[:2]}:{rest[2:]}"
+    # Untitled run: the remainder is just a time — HHMM, or HHMMSS when a second
+    # run claimed the same minute. Without the 6-digit case the raw digits were
+    # rendered as the meeting's title.
+    if rest.isdigit() and len(rest) in (4, 6):
+        return date_str, f"{date_str} {rest[:2]}:{rest[2:4]}"
 
     # Titled run, optionally with an _HHMM collision suffix.
     slug, sep, suffix = rest.rpartition("_")

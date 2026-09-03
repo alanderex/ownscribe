@@ -99,11 +99,15 @@ enum MeetingLoader {
             return name
         }
         parts.removeFirst()
-        // Untitled run: the remainder is just HHMM, so there is no title to show.
+        // Untitled run: the remainder is just a time — HHMM, or HHMMSS when a second
+        // run claimed the same minute. Without the 6-digit case the raw digits showed
+        // up as the meeting's title in Recents.
+        //
         // `260609-2026` is genuinely ambiguous — an untitled run at 20:26 and a meeting
         // titled "2026" produce the same name — and untitled runs are far more common,
         // so it is read as a timestamp.
-        if parts.count == 1, parts[0].count == 4, parts[0].allSatisfy(\.isNumber) {
+        if parts.count == 1, parts[0].count == 4 || parts[0].count == 6,
+           parts[0].allSatisfy(\.isNumber) {
             return name
         }
         return parts.joined(separator: " ").capitalized

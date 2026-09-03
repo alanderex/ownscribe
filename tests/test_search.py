@@ -748,3 +748,23 @@ class TestFolderNameLayouts:
         meetings, _ = _discover_meetings(tmp_path, since="2026-01-01", limit=None)
 
         assert [m.folder_name for m in meetings] == ["260827-recent"]
+
+
+class TestSecondsDisambiguatedFolders:
+    """A run that fell back to YYMMDD-HHMMSS is untitled, not titled "140233"."""
+
+    def test_it_reads_as_a_timestamp_not_a_title(self):
+        from ownscribe.search import _parse_folder_name
+
+        date, label = _parse_folder_name("260902-140233")
+
+        assert date == "2026-09-02"
+        assert "140233" not in label
+        assert "14:02" in label
+
+    def test_a_titled_run_is_unaffected(self):
+        from ownscribe.search import _parse_folder_name
+
+        _, label = _parse_folder_name("260902-budget-2026")
+
+        assert "Budget 2026" in label

@@ -192,7 +192,17 @@ def _find_binary() -> Path | None:
     # copied over it (the documented workaround) is not.
     cached = _CACHE_DIR / "ownscribe-audio"
     if cached.exists() and cached.is_file():
-        _helper_is_downloaded = _is_downloaded(cached)
+        came_from_download = _is_downloaded(cached)
+        # Verification used to happen only at download time, so a cached binary was
+        # trusted forever after — including one modified on disk afterwards. Re-check
+        # it on every resolve; it is about to be executed with Screen Recording and
+        # microphone access. A locally built helper has no recorded digest to check
+        # against and is the user's own, so it is left alone.
+        if came_from_download and not _verify_sha256(cached, _SUPPORTED_ARCH):
+            cached.unlink(missing_ok=True)
+            (_CACHE_DIR / _ORIGIN_MARKER).unlink(missing_ok=True)
+            return _download_binary()
+        _helper_is_downloaded = came_from_download
         return cached
 
     # Fall back to PATH

@@ -340,13 +340,23 @@ class TestDownloadedHelperDetection:
             return found, coreaudio.helper_is_downloaded()
 
     def test_a_cached_download_is_still_recognised(self, tmp_path):
+        """The digest is stubbed to match: a cached download is now re-verified on
+        every resolve, so planted bytes would otherwise be refused and deleted."""
+        import hashlib
+
         from ownscribe.audio import coreaudio
 
+        payload = b"downloaded helper"
         binary = tmp_path / "ownscribe-audio"
-        binary.write_bytes(b"downloaded helper")
+        binary.write_bytes(payload)
         coreaudio._mark_downloaded(binary)
 
-        found, is_downloaded = self._resolve(tmp_path)
+        with mock.patch.dict(
+            coreaudio._HELPER_SHA256,
+            {coreaudio._SUPPORTED_ARCH: hashlib.sha256(payload).hexdigest()},
+            clear=False,
+        ):
+            found, is_downloaded = self._resolve(tmp_path)
 
         assert found == binary
         assert is_downloaded is True
@@ -412,3 +422,50 @@ class TestHelperDigestIsRecorded:
         # And the real recorded digest rejects unrelated bytes.
         assert expected != hashlib.sha256(b"payload").hexdigest()
         assert coreaudio._verify_sha256(binary, arch) is False
+
+
+class TestCachedHelperIsReVerified:
+    """Verification used to happen only at download time.
+
+    A cached binary was then trusted forever — including one modified on disk
+    afterwards — even though it is about to run with Screen Recording and
+    microphone access.
+    """
+
+    @staticmethod
+    def _resolve(cache_dir):
+        from ownscribe.audio import coreaudio
+
+        with (
+            mock.patch.object(coreaudio, "_CACHE_DIR", cache_dir),
+            mock.patch.object(coreaudio, "_BINARY_CANDIDATES", []),
+            mock.patch.object(coreaudio.shutil, "which", return_value=None),
+            mock.patch.object(coreaudio, "_download_binary", return_value=None) as dl,
+        ):
+            return coreaudio._find_binary(), dl
+
+    def test_a_tampered_cached_download_is_removed(self, tmp_path, capsys):
+        """The marker still matches, so it claims to be our download — but the
+        digest does not match the release it claims to be."""
+        from ownscribe.audio import coreaudio
+
+        binary = tmp_path / "ownscribe-audio"
+        binary.write_bytes(b"tampered after download")
+        coreaudio._mark_downloaded(binary)  # marker agrees with the current bytes
+
+        found, dl = self._resolve(tmp_path)
+
+        assert found is None
+        assert not binary.exists(), "a binary failing verification was left in place"
+        dl.assert_called_once()  # re-fetches rather than silently giving up
+        assert "checksum mismatch" in capsys.readouterr().err
+
+    def test_a_locally_built_helper_is_left_alone(self, tmp_path):
+        """It has no recorded digest to check against and is the user's own."""
+        binary = tmp_path / "ownscribe-audio"
+        binary.write_bytes(b"locally built helper")
+
+        found, dl = self._resolve(tmp_path)
+
+        assert found == binary
+        dl.assert_not_called()
