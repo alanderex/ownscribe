@@ -7,9 +7,10 @@ options:
 
 settings:
   base:
-    # Keep in step with CFBundleShortVersionString in build-app.sh and the
-    # macappRelease tag in Sources/Core/OwnscribeCLI.swift.
-    MARKETING_VERSION: "0.15.3"
+    # Keep in step with CFBundleShortVersionString in build-app.sh. This is the
+    # app's own version and is independent of macappRelease, which names the CLI
+    # tag the app installs — a Swift-only release bumps this one only.
+    MARKETING_VERSION: "0.15.4"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.9"
     DEVELOPMENT_TEAM: ""

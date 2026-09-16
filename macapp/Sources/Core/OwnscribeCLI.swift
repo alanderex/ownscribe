@@ -55,6 +55,11 @@ final class OwnscribeCLI {
     /// named here is what a menu-bar install actually runs, so a fix that is merged
     /// but not tagged reaches nobody. v0.15.2 predates helper checksum verification;
     /// v0.15.3 is the first tag that contains it.
+    ///
+    /// This is deliberately NOT the app's own version. CFBundleShortVersionString
+    /// tracks the bundle; this tracks the CLI the bundle installs. A Swift-only
+    /// release bumps the former and leaves this alone — otherwise needsUpgrade
+    /// fires and every user reinstalls a multi-GB venv for no change at all.
     static let macappRelease = "macapp-v0.15.3"
 
     private static let pipSpec =

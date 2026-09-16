@@ -58,6 +58,8 @@ private struct GeneralTab: View {
 
     var body: some View {
         Form {
+            LaunchAtLoginRow()
+            Divider()
             Picker("Default capture", selection: app.boolBinding(\.audio.mic, key: "audio.mic")) {
                 Text("System only").tag(false)
                 Text("System + Mic").tag(true)
@@ -293,5 +295,67 @@ extension AppState {
             get: { self.config[keyPath: keyPath] },
             set: { self.updateConfig(key, String($0)) }
         )
+    }
+}
+
+/// "Launch at login", backed by SMAppService so the app owns its own login item.
+///
+/// The state is re-read on appear rather than cached: the entry can be removed
+/// outside the app — in System Settings, or by an OS upgrade, which is how it was
+/// lost on macOS 27 — and a toggle that kept showing "on" would be lying.
+private struct LaunchAtLoginRow: View {
+    @State private var state: LaunchAtLogin.State = .off
+    @State private var failure: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle("Launch at login", isOn: Binding(
+                get: { state == .on },
+                set: { setEnabled($0) }
+            ))
+            .disabled(state == .unavailable)
+
+            if let failure {
+                Text(failure)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if state == .needsApproval {
+                HStack(spacing: 6) {
+                    Text("Waiting for approval in System Settings.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Button("Open") { LaunchAtLogin.openSettings() }
+                        .buttonStyle(.link)
+                        .font(.caption2)
+                }
+            } else if state == .unavailable {
+                Text("Unavailable — move Ownscribe to /Applications and sign it with "
+                     + "make-signing-cert.sh, then reopen.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if !LaunchAtLogin.isInStableLocation {
+                // Registering from a build directory records that path, so the entry
+                // breaks the moment the app is copied into /Applications.
+                Text("Running from outside /Applications — a login item registered "
+                     + "here will break when the app is moved.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onAppear { state = LaunchAtLogin.state }
+    }
+
+    private func setEnabled(_ on: Bool) {
+        failure = nil
+        do {
+            try LaunchAtLogin.setEnabled(on)
+        } catch {
+            failure = "Couldn't \(on ? "enable" : "disable") it: \(error.localizedDescription)"
+        }
+        // Re-read rather than assume: register() can land in .requiresApproval.
+        state = LaunchAtLogin.state
     }
 }

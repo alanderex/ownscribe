@@ -13,6 +13,26 @@ single source of truth and the app never reimplements pipeline logic.
 - A from-source ownscribe install in the repo (`uv sync` at the repo root, so
   `.venv/bin/ownscribe` exists).
 
+## Launch at login
+
+Settings › General has a **Launch at login** toggle. It uses `SMAppService`, so the
+app registers its own login item and appears under System Settings › General ›
+Login Items & Extensions as the app itself.
+
+This replaces dragging the bundle into Login Items by hand. A hand-added entry is
+keyed to the bundle's path and signature, which is why it did not survive the
+macOS 27 upgrade — the app had no way to notice or repair it. Two conditions for
+it to stick:
+
+- Run the app from `/Applications`. Registering from a build directory records
+  that path, and the entry breaks the moment the app is moved.
+- Sign with the local certificate (`make-signing-cert.sh`). An ad-hoc signature
+  gives the bundle no stable identity, so the registration can be dropped again on
+  the next upgrade.
+
+macOS may show the login item as pending approval the first time; the toggle links
+straight to the right pane.
+
 ## Side-by-side builds (keeping a fallback)
 
 `build-app.sh --variant NAME` builds a second app that coexists with the installed
