@@ -50,3 +50,19 @@ jobs:
         run: bash macapp/build-app.sh
       - name: Build a side-by-side variant
         run: bash macapp/build-app.sh --variant CI
+
+      # Not just a compile check any more: the bundle is downloadable. Building the
+      # app needs Apple's macro plugins, which ship with Xcode and not with the
+      # Command Line Tools, so a machine with only the CLT can no longer build it at
+      # all. This is the way out that doesn't cost a 10 GB Xcode install.
+      #
+      # Tarred first because upload-artifact re-zips what it is given and drops the
+      # executable bit and the code signature along the way, which would leave an
+      # .app that cannot launch.
+      - name: Pack the bundle
+        run: tar -C macapp/build -czf Ownscribe-app.tar.gz Ownscribe.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Ownscribe-app-${{ matrix.os }}
+          path: Ownscribe-app.tar.gz
+          retention-days: 14

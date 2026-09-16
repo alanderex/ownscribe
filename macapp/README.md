@@ -8,7 +8,16 @@ single source of truth and the app never reimplements pipeline logic.
 ## Requirements
 
 - macOS 14.0+
-- Xcode 15+
+- **Xcode 15+ — the full app, not just the Command Line Tools.** `build-app.sh`
+  calls `swiftc` directly and needs no Xcode *project*, which long made the CLT
+  enough. It no longer is: in the macOS 26+ SDK, SwiftUI's `@State` is a macro,
+  macros are expanded by plugin executables, and those plugins ship with Xcode
+  only. With the CLT alone the build fails on the first `@State` with
+  `external macro implementation type 'SwiftUIMacros.StateMacro' could not be
+  found`. Check with `xcode-select -p`: it must name an `Xcode.app`, not
+  `/Library/Developer/CommandLineTools`.
+  If installing Xcode isn't worth it, CI builds the bundle on every push to
+  `main` — see "Building without Xcode" below.
 - [XcodeGen](https://github.com/yonyz/XcodeGen) — `brew install xcodegen`
 - A from-source ownscribe install in the repo (`uv sync` at the repo root, so
   `.venv/bin/ownscribe` exists).
@@ -73,7 +82,8 @@ To promote a variant to stable: rebuild without `--variant`, and delete
 
 Two options — both produce the same app.
 
-**A. No Xcode required (fastest):** builds a signed `.app` with `swiftc` alone.
+**A. No Xcode *project* required (fastest):** builds a signed `.app` with `swiftc`
+alone. Xcode itself still has to be installed — see Requirements.
 
 ```bash
 ./macapp/build-app.sh --run     # builds macapp/build/Ownscribe.app and opens it
@@ -98,6 +108,29 @@ open Ownscribe.xcodeproj    # then press ⌘R in Xcode
 On first launch the app asks for your **ownscribe project folder** — pick the
 repo root (the folder containing `.venv/bin/ownscribe`). It's remembered after
 that.
+
+### Building without Xcode
+
+CI builds the bundle on every push to `main` and on every pull request, so a
+machine with only the Command Line Tools can still get a runnable app.
+
+1. Open the CI run on GitHub → **Actions** → the `macapp (macos-latest)` job →
+   **Artifacts** → download `Ownscribe-app-macos-latest`.
+2. Unpack and install it:
+
+   ```bash
+   tar xzf Ownscribe-app.tar.gz
+   codesign --force --sign "Ownscribe Local Signing" \
+     --entitlements macapp/Resources/Ownscribe.entitlements Ownscribe.app
+   rm -rf /Applications/Ownscribe.app
+   cp -R Ownscribe.app /Applications/
+   ```
+
+The re-signing step matters. CI has no access to your local signing identity, so
+it signs ad-hoc; an ad-hoc bundle gets fresh Screen Recording and Microphone
+prompts on every install and gives `SMAppService` no stable identity to attach a
+login item to. `codesign` ships with the Command Line Tools, so this works
+without Xcode. Create the identity once with `./macapp/make-signing-cert.sh`.
 
 ## Permissions (one-time)
 
