@@ -34,7 +34,16 @@ jobs:
   macapp:
     # The menu-bar app had no automated verification at all: a Swift compile error
     # could land on main unnoticed. build-app.sh needs no Xcode project.
-    runs-on: macos-14
+    #
+    # Two runners on purpose. macos-14 holds the deployment target honest; the
+    # floating latest is what catches SDK-driven breakage, which is the failure mode
+    # this job has actually seen — SwiftUI's @State became a macro in a newer SDK and
+    # stopped compiling, invisibly to a pinned-old runner.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Build Ownscribe.app

@@ -56,12 +56,48 @@ echo "  managed env:  ~/Library/Application Support/$MANAGED_ROOT_NAME"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
+# Swift macros are expanded by separate plugin executables, and the compiler only
+# loads the ones it is pointed at. Xcode passes those paths itself; a bare `swiftc`
+# gets none, so anything macro-backed fails to resolve.
+#
+# That stayed invisible while SwiftUI's @State was a property wrapper. In the macOS
+# 26+ SDK it became a macro, so on a newer toolchain this build started failing with
+#   external macro implementation type 'SwiftUIMacros.StateMacro' could not be found
+# on the first @State in the tree. Nothing in the app changed — the SDK did.
+#
+# Two kinds of plugin, two flags. Ones shipped with the toolchain load in-process
+# (-plugin-path); ones shipped with the SDK, SwiftUIMacros among them, run out of
+# process and need the plugin server named alongside them (-external-plugin-path).
+# Directories are probed rather than assumed: the layout differs between a full
+# Xcode and the Command Line Tools, and has moved between releases.
+SDK_PATH="$(xcrun -sdk macosx --show-sdk-path)"
+PLUGIN_SERVER="$(xcrun -sdk macosx -f swift-plugin-server 2>/dev/null || true)"
+PLUGIN_FLAGS=()
+if [ -n "$PLUGIN_SERVER" ]; then
+    TOOLCHAIN_USR="$(dirname "$(dirname "$PLUGIN_SERVER")")"
+    for d in "$TOOLCHAIN_USR/lib/swift/host/plugins" \
+             "$TOOLCHAIN_USR/local/lib/swift/host/plugins"; do
+        [ -d "$d" ] && PLUGIN_FLAGS+=(-plugin-path "$d")
+    done
+    for d in "$SDK_PATH/usr/lib/swift/host/plugins" \
+             "$SDK_PATH/usr/local/lib/swift/host/plugins"; do
+        [ -d "$d" ] && PLUGIN_FLAGS+=(-external-plugin-path "$d#$PLUGIN_SERVER")
+    done
+fi
+if [ ${#PLUGIN_FLAGS[@]} -eq 0 ]; then
+    echo "warning: no Swift macro plugins found; macro-backed code (@State, @Observable)" >&2
+    echo "         will fail to compile. Check 'xcode-select -p' and 'xcrun -f swift-plugin-server'." >&2
+fi
+
 # Compile every Swift source into the bundle executable. Source paths contain
 # no spaces, so word-splitting the find output is fine (portable to bash 3.2).
+# ${arr[@]+...} guards the expansion: under `set -u`, bash 3.2 (still /bin/bash on
+# macOS) treats an empty array as unbound.
 # shellcheck disable=SC2046
 xcrun -sdk macosx swiftc \
     -O -parse-as-library \
     -target "$TARGET" \
+    ${PLUGIN_FLAGS[@]+"${PLUGIN_FLAGS[@]}"} \
     -o "$APP/Contents/MacOS/$EXEC_NAME" \
     $(find "$SCRIPT_DIR/Sources" -name '*.swift')
 
