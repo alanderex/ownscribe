@@ -87,6 +87,11 @@ fi
 if [ ${#PLUGIN_FLAGS[@]} -eq 0 ]; then
     echo "warning: no Swift macro plugins found; macro-backed code (@State, @Observable)" >&2
     echo "         will fail to compile. Check 'xcode-select -p' and 'xcrun -f swift-plugin-server'." >&2
+else
+    # Printed because "macro not found" looks identical whether no paths were passed
+    # or the wrong ones were, and the difference is the whole diagnosis.
+    echo "  macro plugins:"
+    printf '    %s\n' "${PLUGIN_FLAGS[@]}" | grep -v '^    -' || true
 fi
 
 # Compile every Swift source into the bundle executable. Source paths contain
