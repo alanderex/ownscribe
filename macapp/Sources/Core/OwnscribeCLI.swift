@@ -79,7 +79,7 @@ final class OwnscribeCLI {
     /// the release tag, so an unreleased CLI can be tried before its tag exists:
     ///
     ///     defaults write dev.p4l.ownscribe.menubar.next OWNSCRIBE_CLI_SPEC \
-    ///       "ownscribe[all] @ file:///path/to/checkout"
+    ///       -string "ownscribe[all] @ file:///path/to/checkout"
     ///
     /// A `defaults` key rather than an environment variable: `open`, which
     /// build-app.sh --run uses, does not pass the environment to the app. The stable

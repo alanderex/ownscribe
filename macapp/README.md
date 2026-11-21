@@ -83,10 +83,11 @@ To promote a variant to stable: rebuild without `--variant`, and delete
 A variant installs the CLI from the release tag in `OwnscribeCLI.macappRelease`,
 like the stable app. To try a CLI change before its tag exists, point the
 variant's `OWNSCRIBE_CLI_SPEC` default at any pip requirement, such as your
-checkout:
+checkout. `-string` is required: without it `defaults` tries to parse the
+brackets and refuses the value.
 
 ```bash
-defaults write dev.p4l.ownscribe.menubar.next OWNSCRIBE_CLI_SPEC "ownscribe[all] @ file://$PWD"
+defaults write dev.p4l.ownscribe.menubar.next OWNSCRIBE_CLI_SPEC -string "ownscribe[all] @ file://$PWD"
 ```
 
 The variant reinstalls ownscribe from that spec the next time it starts, and
