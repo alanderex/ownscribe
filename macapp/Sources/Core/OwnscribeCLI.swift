@@ -122,6 +122,13 @@ final class OwnscribeCLI {
 
     /// First-run setup: create the managed venv and install ownscribe into it with `uv`.
     /// Run through a login shell so `uv` is found on the user's PATH.
+    ///
+    /// Upgrades reinstall the ownscribe package only. Every macapp tag carries the
+    /// same pyproject version, so without a forced reinstall uv would keep the old
+    /// code; `--reinstall` forced it for every dependency too, reinstalling the whole
+    /// multi-GB ML stack each time. uv resolves and builds before it touches the
+    /// venv, so a failed upgrade (missing tag, build error, no network) leaves the
+    /// installed CLI runnable.
     func install() async -> CommandResult {
         try? FileManager.default.createDirectory(
             at: Self.managedRoot, withIntermediateDirectories: true)
@@ -132,7 +139,7 @@ final class OwnscribeCLI {
           exit 127
         fi
         [ -x "\(venvDir.path)/bin/python" ] || uv venv "\(venvDir.path)"
-        uv pip install --reinstall --python "\(venvDir.path)/bin/python" "\(Self.pipSpec)"
+        uv pip install --reinstall-package ownscribe --python "\(venvDir.path)/bin/python" "\(Self.pipSpec)"
         """
         let result = await CommandRunner.run(
             executable: URL(fileURLWithPath: "/bin/zsh"),
