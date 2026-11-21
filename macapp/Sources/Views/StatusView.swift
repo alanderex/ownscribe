@@ -5,6 +5,7 @@ struct StatusView: View {
     @Environment(Engine.self) private var engine
     @Environment(Recorder.self) private var recorder
     @Environment(Jobs.self) private var jobs
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 18) {
@@ -23,7 +24,7 @@ struct StatusView: View {
             Image(systemName: "record.circle.fill")
                 .font(.system(size: 44))
                 .foregroundStyle(.red)
-                .symbolEffect(.pulse, options: .repeating)
+                .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
 
             ElapsedText(font: .system(size: 34, weight: .semibold, design: .monospaced))
 
@@ -49,7 +50,13 @@ struct StatusView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            if jobs.steps.isEmpty {
+            if recorder.phase == .finalizing {
+                ProgressView().controlSize(.large)
+                Text("Finalizing…").font(.callout)
+                Text("Merging the recorded tracks.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if jobs.steps.isEmpty {
                 // No events yet — the CLI is still starting up, or is an older build
                 // without OWNSCRIBE_PROGRESS_EVENTS support.
                 ProgressView().controlSize(.large)
@@ -61,11 +68,14 @@ struct StatusView: View {
             } else {
                 StepChecklist(steps: jobs.steps)
             }
-            Button(role: .destructive, action: jobs.cancel) {
-                Text("Cancel")
+            // Not while finalizing: SIGTERM during the track merge loses the recording.
+            if recorder.phase != .finalizing {
+                Button(role: .destructive, action: jobs.cancel) {
+                    Text("Cancel")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
         }
     }
 }

@@ -10,6 +10,7 @@ enum SidebarItem: Hashable {
 /// selected item in the detail pane.
 struct MainWindow: View {
     @Environment(Library.self) private var library
+    @Environment(Jobs.self) private var jobs
     @State private var selection: SidebarItem?
     @State private var query = ""
     @FocusState private var searchFocused: Bool
@@ -23,6 +24,9 @@ struct MainWindow: View {
             DetailPane(selection: selection)
         }
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                RecorderToolbarButton()
+            }
             ToolbarItem(placement: .primaryAction) {
                 TextField("Search titles and summaries", text: $query)
                     .textFieldStyle(.roundedBorder)
@@ -33,6 +37,18 @@ struct MainWindow: View {
             }
         }
         .focusedSceneValue(\.focusSearch, FocusSearchAction { searchFocused = true })
+        .onChange(of: jobs.lastFinished) { _, finished in
+            guard let finished else { return }
+            // Completion never takes the selection away from something else: the
+            // finished meeting opens only in place of nothing, or of its own run.
+            switch selection {
+            case nil, .activeRun?: selection = .meeting(finished.folder)
+            default: break
+            }
+        }
+        .onChange(of: selection) { _, selected in
+            if case .meeting(let path)? = selected { library.markSeen(path) }
+        }
     }
 
     private var columnVisibility: Binding<NavigationSplitViewVisibility> {
@@ -54,6 +70,8 @@ private struct DetailPane: View {
         case .meeting(let path):
             if let row = library.rows.first(where: { $0.path == path }) {
                 MeetingDetailView(row: row)
+            } else if library.isListing {
+                ProgressView()
             } else {
                 ContentUnavailableView(
                     "Meeting not found", systemImage: "questionmark.folder",

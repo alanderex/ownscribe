@@ -14,6 +14,10 @@ final class Library {
     private(set) var listFailure: String?
     /// Summary text by folder path, for the search field.
     private(set) var summaries: [String: String] = [:]
+    /// True while `show --list` runs.
+    private(set) var isListing = false
+    /// Meetings that finished but have not been opened yet, by folder path.
+    private(set) var unseen: Set<String> = []
     let calendar = LibraryCalendar()
 
     private(set) var recentMeetings: [Meeting] = []
@@ -24,7 +28,6 @@ final class Library {
 
     private let engine: Engine
     @ObservationIgnored private var watcher: DirectoryWatcher?
-    @ObservationIgnored private var listing = false
     @ObservationIgnored private var listAgain = false
 
     init(engine: Engine) {
@@ -49,8 +52,8 @@ final class Library {
     /// the current one is done, so a burst of changes costs at most two runs.
     private func listRows() {
         guard engine.cli.isInstalled else { return }
-        if listing { listAgain = true; return }
-        listing = true
+        if isListing { listAgain = true; return }
+        isListing = true
         Task {
             let result = await engine.cli.run(["show", "--list", "--json"])
             if result.ok {
@@ -66,7 +69,7 @@ final class Library {
                 listFailure = FailureText.firstMeaningfulLine(result.stderr)
                     ?? "Listing meetings failed (exit \(result.exitCode))."
             }
-            listing = false
+            isListing = false
             if listAgain {
                 listAgain = false
                 listRows()
@@ -108,6 +111,15 @@ final class Library {
         if engine.config.diarization.enabled, let transcript = transcriptURL {
             Task { detectedSpeakers = await engine.cli.listSpeakers(transcript) }
         }
+    }
+
+    func markUnseen(_ path: String) {
+        unseen.insert(path)
+    }
+
+    /// The meeting was opened, in the window or the menu.
+    func markSeen(_ path: String) {
+        unseen.remove(path)
     }
 
     func closeMeeting() {

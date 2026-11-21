@@ -27,8 +27,11 @@ struct SidebarView: View {
                         .foregroundStyle(.secondary)
                         .accessibilityAddTraits(.isHeader)
                     ForEach(section.rows) { row in
-                        LibraryRowView(row: row, time: library.calendar.time(of: row))
-                            .tag(SidebarItem.meeting(row.path))
+                        LibraryRowView(
+                            row: row, time: library.calendar.time(of: row),
+                            isNew: library.unseen.contains(row.path)
+                        )
+                        .tag(SidebarItem.meeting(row.path))
                             .contextMenu { menu(for: row) }
                     }
                 }
@@ -64,11 +67,11 @@ struct SidebarView: View {
         let matching = library.rows.filter {
             LibrarySearch.matches($0, query: query, summary: library.summaries[$0.path])
         }
-        return library.calendar.sections(matching)
+        return library.calendar.sections(matching, excluding: Set([jobs.ownedFolder].compactMap { $0 }))
     }
 
     private var hasActiveRun: Bool {
-        if recorder.isRecording || jobs.isRunning { return true }
+        if recorder.phase != .idle || jobs.isRunning { return true }
         if case .failed = jobs.state { return true }
         return false
     }
@@ -88,6 +91,8 @@ private struct ActiveRunRow: View {
                 ElapsedText(font: .caption)
                     .foregroundStyle(.secondary)
             }
+        } else if recorder.phase == .finalizing {
+            Label("Finalizing…", systemImage: "hourglass")
         } else if jobs.isRunning {
             VStack(alignment: .leading, spacing: 2) {
                 Label("Processing", systemImage: "hourglass")
@@ -112,9 +117,17 @@ private struct ActiveRunRow: View {
 struct LibraryRowView: View {
     let row: LibraryRow
     let time: Date?
+    /// Finished since it was last opened.
+    var isNew = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
+            if isNew {
+                Circle()
+                    .fill(.tint)
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.title)
                     .lineLimit(1)
@@ -145,6 +158,7 @@ struct LibraryRowView: View {
 
     private var accessibilityText: String {
         var parts = [row.title]
+        if isNew { parts.append("new") }
         if let time { parts.append(time.formatted(date: .omitted, time: .shortened)) }
         if let duration = row.duration { parts.append(Duration.seconds(duration).formatted(.units(width: .wide))) }
         if row.speakerCount > 0 { parts.append("\(row.speakerCount) speakers") }

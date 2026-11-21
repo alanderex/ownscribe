@@ -10,6 +10,12 @@ struct RunDetailView: View {
         Group {
             if recorder.isRecording {
                 recording
+            } else if recorder.phase == .finalizing {
+                VStack(spacing: 10) {
+                    ProgressView()
+                    Text("Finalizing…").font(.title3)
+                    Text("Merging the recorded tracks.").foregroundStyle(.secondary)
+                }
             } else if jobs.isRunning {
                 processing
             } else if case .failed(let message) = jobs.state {

@@ -35,6 +35,16 @@ final class Jobs {
     private(set) var activeStepKey: String?
     /// True when the last recording ended by silence auto-stop rather than Stop.
     private(set) var autoStopped = false
+    /// The meeting folder the running process writes, from recording_started. The
+    /// library leaves it out until the run is over.
+    private(set) var ownedFolder: String?
+    /// The last run that finished, and where its meeting ended up.
+    private(set) var lastFinished: FinishedRun?
+
+    struct FinishedRun: Equatable {
+        let run: Int
+        let folder: String
+    }
 
     /// Called when the run stops capturing audio: recording_stopped, an exit, or Cancel.
     @ObservationIgnored var onCaptureEnded: (() -> Void)?
@@ -74,6 +84,7 @@ final class Jobs {
         steps = []
         activeStepKey = nil
         autoStopped = false
+        ownedFolder = nil
         state = .running
         runToken &+= 1
         let token = runToken
@@ -100,6 +111,7 @@ final class Jobs {
         runToken &+= 1
         running?.terminate()
         running = nil
+        ownedFolder = nil
         state = .idle
         onCaptureEnded?()
     }
@@ -114,6 +126,9 @@ final class Jobs {
     private func handleProgressEvent(_ token: Int, _ event: ProgressEvent) {
         guard token == runToken else { return }
         switch event.event {
+        case "recording_started":
+            ownedFolder = event.folder
+
         case "recording_stopped":
             // Capture is over and transcription is starting. Reaching this without the
             // user pressing Stop means silence auto-stop fired — which the app used to
@@ -158,6 +173,7 @@ final class Jobs {
         // acting on it would tear down whatever is running now.
         guard token == runToken else { return }
         running = nil
+        ownedFolder = nil
         onCaptureEnded?()
 
         guard result.ok else {
@@ -179,6 +195,8 @@ final class Jobs {
             return
         }
         state = .idle
+        library.markUnseen(meeting.url.path)
+        lastFinished = FinishedRun(run: token, folder: meeting.url.path)
         library.show(meeting)
         library.refresh()
     }

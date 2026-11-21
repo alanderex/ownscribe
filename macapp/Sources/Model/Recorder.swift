@@ -11,6 +11,9 @@ final class Recorder {
     enum Phase: Equatable {
         case idle
         case recording
+        /// Stop was pressed; the helper is merging the tracks, which can take up to
+        /// 30 s, until the CLI reports recording_stopped.
+        case finalizing
     }
 
     private(set) var phase: Phase = .idle
@@ -68,7 +71,9 @@ final class Recorder {
 
     func stop() {
         guard phase == .recording else { return }
-        captureEnded()
+        phase = .finalizing
+        timer?.invalidate()
+        timer = nil
         jobs.interrupt()   // SIGINT → stop recording, continue pipeline
     }
 

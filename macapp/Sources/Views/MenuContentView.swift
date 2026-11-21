@@ -62,7 +62,7 @@ struct MenuContentView: View {
             FailedView(message: message, permission: nil)
         } else if let permission = engine.permissionFailure {
             FailedView(message: permission.message, permission: permission)
-        } else if recorder.isRecording || jobs.isRunning {
+        } else if recorder.phase != .idle || jobs.isRunning {
             StatusView()
         } else if case .failed(let message) = jobs.state {
             FailedView(message: message, permission: nil)
