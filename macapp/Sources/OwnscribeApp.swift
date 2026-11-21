@@ -96,6 +96,7 @@ struct MainWindowScene: Scene {
         }
         .defaultSize(width: 1100, height: 720)
         .commands {
+            SettingsCommands(windows: model.windows)
             LibraryCommands()
             RecordingCommands(recorder: model.recorder, jobs: model.jobs)
         }
@@ -111,6 +112,20 @@ struct SettingsScene: Scene {
                 .environment(model.engine)
         }
         .windowResizability(.contentSize)
+    }
+}
+
+/// Settings… (⌘,) in the app menu. Settings stays a plain window, so the app's
+/// own command opens it the same way the menu does, Dock icon included.
+struct SettingsCommands: Commands {
+    let windows: WindowCoordinator
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { windows.open(WindowID.settings, with: openWindow) }
+                .keyboardShortcut(",")
+        }
     }
 }
 
