@@ -351,6 +351,22 @@ def _parse_speaker_map(pairs: tuple[str, ...]) -> dict[str, str]:
     return mapping
 
 
+@cli.command()
+@click.argument("directory", type=click.Path(exists=True, file_okay=False))
+@click.option("--json", "as_json", is_flag=True, help="Print JSON (the only output format).")
+@click.pass_context
+def show(ctx: click.Context, directory: str, as_json: bool) -> None:
+    """Describe a meeting folder as JSON: turns, speakers, duration and status."""
+    import json
+    from pathlib import Path
+
+    from ownscribe.show import meeting_detail
+
+    if not as_json:
+        raise click.UsageError("show prints JSON only; pass --json.")
+    click.echo(json.dumps(meeting_detail(ctx.obj["config"], Path(directory).resolve()), ensure_ascii=False))
+
+
 @cli.command("list-speakers")
 @click.argument("transcript", type=click.Path(exists=True, dir_okay=False))
 def list_speakers_cmd(transcript: str) -> None:
