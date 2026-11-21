@@ -9,6 +9,7 @@ enum SidebarItem: Hashable {
 /// The workspace: the library and the run in progress in the sidebar, the
 /// selected item in the detail pane.
 struct MainWindow: View {
+    @Environment(Engine.self) private var engine
     @Environment(Library.self) private var library
     @Environment(Jobs.self) private var jobs
     @Environment(WindowCoordinator.self) private var windows
@@ -18,6 +19,18 @@ struct MainWindow: View {
     @AppStorage("mainWindow.sidebarVisible") private var sidebarVisible = true
 
     var body: some View {
+        if let setup = SetupState(engine: engine) {
+            // First run and missing grants take the whole window, as in the menu.
+            setup.view
+                .frame(maxWidth: 480)
+                .padding(40)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            workspace
+        }
+    }
+
+    private var workspace: some View {
         NavigationSplitView(columnVisibility: columnVisibility) {
             SidebarView(selection: $selection, query: query)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 380)
@@ -119,6 +132,33 @@ struct LibraryCommands: Commands {
             Button("Find…") { focusSearch?.focus() }
                 .keyboardShortcut("f")
                 .disabled(focusSearch == nil)
+        }
+    }
+}
+
+/// What the window shows instead of the workspace while the engine is not ready.
+private enum SetupState {
+    case installing
+    case failed(String, Engine.PermissionFailure?)
+
+    @MainActor
+    init?(engine: Engine) {
+        if engine.isInstalling {
+            self = .installing
+        } else if let message = engine.setupFailure {
+            self = .failed(message, nil)
+        } else if let permission = engine.permissionFailure {
+            self = .failed(permission.message, permission)
+        } else {
+            return nil
+        }
+    }
+
+    @ViewBuilder
+    var view: some View {
+        switch self {
+        case .installing: InstallingView()
+        case .failed(let message, let permission): FailedView(message: message, permission: permission)
         }
     }
 }
