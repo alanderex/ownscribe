@@ -693,6 +693,9 @@ class TestRunWarmup:
             mock.patch("ownscribe.pipeline._create_transcriber", return_value=mock_transcriber),
             mock.patch("ownscribe.pipeline.PipelineProgress") as mock_progress_cls,
             mock.patch("ownscribe.summarization.llama_cpp_summarizer._ensure_model"),
+            # The default model is often already cached on a developer machine,
+            # which would hide the download step this test expects.
+            mock.patch("ownscribe.summarization.llama_cpp_summarizer.is_model_cached", return_value=False),
         ):
             mock_progress_cls.return_value.__enter__.return_value = fake_progress
             run_warmup(config)
@@ -1345,6 +1348,10 @@ class TestConfigCoercion:
         path = tmp_path / "config.toml"
         path.write_text(body)
         monkeypatch.setattr(cfgmod, "CONFIG_PATH", path)
+        # Config.load() lets these override the file; a developer's shell often
+        # sets HF_TOKEN, which would then decide what the TOML assertions see.
+        for name in ("HF_TOKEN", "OLLAMA_HOST", "OPENAI_API_KEY"):
+            monkeypatch.delenv(name, raising=False)
         return cfgmod.Config.load()
 
     def test_string_false_is_not_truthy(self, tmp_path, monkeypatch):
