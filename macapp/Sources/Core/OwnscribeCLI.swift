@@ -52,9 +52,12 @@ final class OwnscribeCLI {
     /// additions (config get/set, list/rename-speakers), so this has to stay a git spec
     /// until those land upstream.
     ///
-    /// To cut a release: `git tag macapp-vX.Y.Z && git push origin macapp-vX.Y.Z`,
-    /// then bump the ref below in the same commit that bumps CFBundleShortVersionString
-    /// in build-app.sh.
+    /// To cut a release: bump the ref below in the same commit that bumps the app
+    /// version (CFBundleShortVersionString in build-app.sh, MARKETING_VERSION in
+    /// project.yml), open a pull request to main, and once CI is green, tag that
+    /// commit as an annotated `macapp-vX.Y.Z`, push the tag, then fast-forward main.
+    /// The tag is on origin before anyone builds a bundle that names it; until then
+    /// a variant build tries the CLI through OWNSCRIBE_CLI_SPEC.
     ///
     /// Never move an existing tag. needsUpgrade compares the spec built from it with
     /// the one recorded beside the installed venv, so a moved tag leaves every
@@ -64,13 +67,14 @@ final class OwnscribeCLI {
     /// Bump this whenever a Python-side change must reach installed apps — the tag
     /// named here is what a menu-bar install actually runs, so a fix that is merged
     /// but not tagged reaches nobody. v0.15.2 predates helper checksum verification;
-    /// v0.15.3 is the first tag that contains it.
+    /// v0.15.3 is the first tag that contains it. v0.16.0 is the first with `show`
+    /// and the folder events the window relies on.
     ///
     /// This is deliberately NOT the app's own version. CFBundleShortVersionString
     /// tracks the bundle; this tracks the CLI the bundle installs. A Swift-only
     /// release bumps the former and leaves this alone — otherwise needsUpgrade
-    /// fires and every user reinstalls a multi-GB venv for no change at all.
-    static let macappRelease = "macapp-v0.15.3"
+    /// fires and every user reinstalls ownscribe for no change at all.
+    static let macappRelease = "macapp-v0.16.0"
 
     private static let pipSpec =
         "ownscribe[all] @ git+https://github.com/alanderex/ownscribe@\(macappRelease)"
