@@ -17,6 +17,10 @@ struct OwnscribeApp: App {
         _library = State(initialValue: library)
         _jobs = State(initialValue: jobs)
         _recorder = State(initialValue: recorder)
+        // Here and not in the popover's .task: MenuBarExtra builds its content only
+        // when the menu is first opened, so setup, an upgrade and loading the
+        // config used to wait for that first click.
+        Task { await engine.bootstrap() }
     }
 
     var body: some Scene {
@@ -26,7 +30,6 @@ struct OwnscribeApp: App {
                 .environment(recorder)
                 .environment(jobs)
                 .environment(library)
-                .task { await engine.bootstrap() }
         } label: {
             MenuBarIcon(engine: engine, recorder: recorder, jobs: jobs)
         }
