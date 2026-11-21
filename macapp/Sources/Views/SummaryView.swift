@@ -23,7 +23,11 @@ struct SummaryView: View {
             }
 
             if !library.detectedSpeakers.isEmpty && !library.speakersNamed {
-                SpeakerNamingView(labels: library.detectedSpeakers)
+                SpeakerNamingView(
+                    labels: library.detectedSpeakers,
+                    apply: library.applySpeakerNames,
+                    skip: { library.speakersNamed = true }
+                )
                 Divider()
             }
 

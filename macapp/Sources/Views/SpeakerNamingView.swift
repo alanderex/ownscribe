@@ -1,10 +1,11 @@
 import SwiftUI
 
 /// One text field per detected speaker label. Applying calls `rename-speakers`,
-/// which rewrites the transcript (summaries don't use labels, so no re-run).
+/// which rewrites the transcript.
 struct SpeakerNamingView: View {
-    @Environment(Library.self) private var library
     let labels: [String]
+    let apply: ([String: String]) -> Void
+    let skip: () -> Void
     @State private var names: [String: String] = [:]
 
     var body: some View {
@@ -25,9 +26,9 @@ struct SpeakerNamingView: View {
             }
 
             HStack {
-                Button("Apply") { library.applySpeakerNames(names) }
+                Button("Apply") { apply(names) }
                     .buttonStyle(.borderedProminent)
-                Button("Skip") { library.speakersNamed = true }
+                Button("Skip", action: skip)
                     .buttonStyle(.bordered)
             }
             .font(.callout)

@@ -1,18 +1,39 @@
+import AppKit
 import SwiftUI
 
-/// One meeting: header and summary.
+/// One meeting: header, then its summary or its transcript.
 struct MeetingDetailView: View {
+    enum Tab: String, CaseIterable, Identifiable {
+        case summary = "Summary"
+        case transcript = "Transcript"
+        var id: String { rawValue }
+    }
+
+    @Environment(Engine.self) private var engine
     @Environment(Library.self) private var library
     let row: LibraryRow
+
     @State private var summary: String?
+    @State private var document: MeetingDocument?
+    @State private var documentFailure: String?
     @State private var loadedPath: String?
+    /// nil until chosen: the summary when there is one, the transcript otherwise.
+    @State private var chosenTab: Tab?
+    @State private var namingSkipped: Set<String> = []
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                MeetingHeader(row: row, day: library.calendar.day(of: row), time: library.calendar.time(of: row))
+                MeetingHeader(
+                    row: row, language: document?.language,
+                    day: library.calendar.day(of: row), time: library.calendar.time(of: row)
+                )
+                tabBar
                 Divider()
-                summaryBody
+                switch tab {
+                case .summary: summaryBody
+                case .transcript: transcriptBody
+                }
             }
             // A readable measure: long lines at window width are hard to follow.
             .frame(maxWidth: 720, alignment: .leading)
@@ -22,36 +43,110 @@ struct MeetingDetailView: View {
         .task(id: row) { await load() }
     }
 
+    private var tab: Tab {
+        chosenTab ?? (summary == nil && row.status.hasTranscript && loadedPath == row.path ? .transcript : .summary)
+    }
+
+    private var tabBar: some View {
+        HStack {
+            Picker("Show", selection: Binding(get: { tab }, set: { chosenTab = $0 })) {
+                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            Spacer()
+            if tab == .transcript, let document, !document.turns.isEmpty {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(document.plainText, forType: .string)
+                } label: {
+                    Label("Copy Transcript", systemImage: "doc.on.doc")
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private var summaryBody: some View {
         if let summary {
             RenderedMarkdown(text: summary, style: .document)
                 .textSelection(.enabled)
         } else if loadedPath == row.path {
-            Text(missingSummaryText)
+            Text(row.status.summary == "disabled"
+                 ? "No summary: summarization is turned off in Settings."
+                 : "No summary for this meeting.")
                 .foregroundStyle(.secondary)
         } else {
             ProgressView().controlSize(.small)
         }
     }
 
-    private var missingSummaryText: String {
-        switch row.status.summary {
-        case "disabled": return "No summary: summarization is turned off in Settings."
-        default: return "No summary for this meeting."
+    @ViewBuilder
+    private var transcriptBody: some View {
+        if let document {
+            let unnamed = document.unnamedSpeakers
+            if !unnamed.isEmpty && !namingSkipped.contains(row.path) {
+                SpeakerNamingView(
+                    labels: document.speakers.map(\.label),
+                    apply: { names in Task { await rename(names) } },
+                    skip: { namingSkipped.insert(row.path) }
+                )
+                .padding(12)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+            }
+            if document.turns.isEmpty {
+                Text("No transcript for this meeting.")
+                    .foregroundStyle(.secondary)
+            } else {
+                TranscriptView(document: document)
+            }
+        } else if let documentFailure {
+            Label(documentFailure, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.secondary)
+        } else {
+            ProgressView().controlSize(.small)
         }
     }
 
     private func load() async {
         let folder = row.url
-        let text = await Task.detached { SummaryFile.text(inFolder: folder) }.value
-        summary = text
+        async let summaryText = Task.detached { SummaryFile.text(inFolder: folder) }.value
+        do {
+            document = try await engine.cli.show(folder)
+            documentFailure = nil
+        } catch {
+            document = nil
+            documentFailure = Self.describe(error)
+        }
+        summary = await summaryText
         loadedPath = row.path
+    }
+
+    /// Rename in every transcript file the folder has, so `show` (which prefers
+    /// transcript.json) and the markdown agree.
+    private func rename(_ names: [String: String]) async {
+        let mapping = names.filter { !$0.value.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard !mapping.isEmpty else { namingSkipped.insert(row.path); return }
+        for name in ["transcript.json", "transcript.md"] {
+            let url = row.url.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: url.path) {
+                await engine.cli.renameSpeakers(url, mapping: mapping)
+            }
+        }
+        await load()
+        library.refresh()
+    }
+
+    private static func describe(_ error: Error) -> String {
+        if case CLIError.command(_, let message) = error { return "Couldn't read the transcript: \(message)" }
+        return "Couldn't read the transcript: \(error)"
     }
 }
 
 struct MeetingHeader: View {
     let row: LibraryRow
+    let language: String?
     let day: Date?
     let time: Date?
 
@@ -72,6 +167,7 @@ struct MeetingHeader: View {
                 ?? day.formatted(date: .abbreviated, time: .omitted))
         }
         if let duration = row.duration { parts.append(ClockText.duration(duration)) }
+        if let language { parts.append(language) }
         if row.speakerCount > 0 { parts.append(row.speakerCount == 1 ? "1 speaker" : "\(row.speakerCount) speakers") }
         return parts.joined(separator: " · ")
     }

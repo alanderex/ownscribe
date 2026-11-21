@@ -205,6 +205,17 @@ final class OwnscribeCLI {
         await run(["config", "set", key, value])
     }
 
+    /// One meeting folder as `show DIR --json` describes it; the decoding runs off
+    /// the main actor.
+    func show(_ folder: URL) async throws -> MeetingDocument {
+        let result = await run(["show", folder.path, "--json"])
+        guard result.ok else {
+            throw CLIError.command("show", FailureText.firstMeaningfulLine(result.stderr) ?? "exit \(result.exitCode)")
+        }
+        let data = Data(result.stdout.utf8)
+        return try await Task.detached { try MeetingDocument.decode(data) }.value
+    }
+
     func listSpeakers(_ transcript: URL) async -> [String] {
         let result = await run(["list-speakers", transcript.path])
         guard result.ok,
