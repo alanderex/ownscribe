@@ -786,6 +786,21 @@ def _find_audio(directory: Path) -> Path | None:
     return None
 
 
+def find_meeting_audio(config: Config, directory: Path) -> Path | None:
+    """The recording that belongs to a meeting folder, or None.
+
+    The folder itself is searched first, since a user may have dropped a file into
+    it. With a separate `output.audio_dir`, the run's audio lives in a folder of the
+    same name there, so that is searched next.
+    """
+    audio = _find_audio(directory)
+    if audio is None and config.output.uses_separate_audio_dir:
+        candidate = config.output.resolved_audio_dir / directory.name
+        if candidate != directory and candidate.is_dir():
+            audio = _find_audio(candidate)
+    return audio
+
+
 def _find_transcript(directory: Path) -> Path | None:
     """Find a transcript file in directory."""
     for ext in ("md", "json"):
@@ -811,14 +826,7 @@ def run_resume(config: Config, directory: str) -> None:
         click.echo(f"Error: {dir_path} is not a directory.", err=True)
         raise SystemExit(1)
 
-    # First look for an audio file in the target directory, since the user is
-    # explicitly resuming there. If none is found and a separate directory is
-    # configured for audio, search that directory as well.
-    audio = _find_audio(dir_path)
-    if audio is None and config.output.uses_separate_audio_dir:
-        candidate = config.output.resolved_audio_dir / dir_path.name
-        if candidate != dir_path and candidate.is_dir():
-            audio = _find_audio(candidate)
+    audio = find_meeting_audio(config, dir_path)
     transcript = _find_transcript(dir_path)
     summary = _find_summary(dir_path)
 

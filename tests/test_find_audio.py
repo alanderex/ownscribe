@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from ownscribe.pipeline import _find_audio
+from ownscribe.config import Config
+from ownscribe.pipeline import _find_audio, find_meeting_audio
 
 
 def _touch(directory, *names):
@@ -54,3 +55,47 @@ class TestFindAudioSkipsUnmergedTracks:
     def test_suffix_check_ignores_case(self, tmp_path):
         _touch(tmp_path, "Recording.WAV.MIC.TMP.WAV")
         assert _find_audio(tmp_path) is None
+
+
+class TestFindMeetingAudio:
+    """Resolve a meeting folder's recording, including a separate output.audio_dir."""
+
+    @staticmethod
+    def _config(tmp_path, *, separate: bool) -> Config:
+        config = Config()
+        config.output.dir = str(tmp_path / "notes")
+        config.output.audio_dir = str(tmp_path / "audio") if separate else ""
+        return config
+
+    def test_audio_in_the_meeting_folder(self, tmp_path):
+        config = self._config(tmp_path, separate=False)
+        meeting = tmp_path / "notes" / "260101-standup"
+        meeting.mkdir(parents=True)
+        _touch(meeting, "recording.wav")
+        assert find_meeting_audio(config, meeting) == meeting / "recording.wav"
+
+    def test_audio_in_the_separate_audio_dir(self, tmp_path):
+        config = self._config(tmp_path, separate=True)
+        meeting = tmp_path / "notes" / "260101-standup"
+        audio = tmp_path / "audio" / "260101-standup"
+        meeting.mkdir(parents=True)
+        audio.mkdir(parents=True)
+        _touch(audio, "recording.wav")
+        assert find_meeting_audio(config, meeting) == audio / "recording.wav"
+
+    def test_the_folders_own_file_wins(self, tmp_path):
+        config = self._config(tmp_path, separate=True)
+        meeting = tmp_path / "notes" / "260101-standup"
+        audio = tmp_path / "audio" / "260101-standup"
+        meeting.mkdir(parents=True)
+        audio.mkdir(parents=True)
+        _touch(meeting, "call.m4a")
+        _touch(audio, "recording.wav")
+        assert find_meeting_audio(config, meeting) == meeting / "call.m4a"
+
+    def test_no_recording_kept(self, tmp_path):
+        config = self._config(tmp_path, separate=True)
+        meeting = tmp_path / "notes" / "260101-standup"
+        meeting.mkdir(parents=True)
+        _touch(meeting, "transcript.md")
+        assert find_meeting_audio(config, meeting) is None
