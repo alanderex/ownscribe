@@ -8,7 +8,7 @@ import os
 from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ownscribe.progress import DownloadProgressEvent, DownloadProgressWriter
 from ownscribe.summarization.base import Summarizer
@@ -16,6 +16,7 @@ from ownscribe.summarization.prompts import clean_response
 
 if TYPE_CHECKING:
     from llama_cpp import Llama
+    from llama_cpp.llama_types import ChatCompletionRequestMessage, CreateChatCompletionResponse
 
     from ownscribe.config import SummarizationConfig, TemplateConfig
 
@@ -188,7 +189,7 @@ class LlamaCppSummarizer(Summarizer):
         json_schema: dict | None = None,
     ) -> str:
         llm = self._get_llm()
-        messages = [
+        messages: list[ChatCompletionRequestMessage] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
@@ -209,7 +210,8 @@ class LlamaCppSummarizer(Summarizer):
                 kwargs: dict = {}
                 if fmt is not None:
                     kwargs["response_format"] = fmt
-                response = llm.create_chat_completion(messages=messages, **kwargs)
+                # Without stream=True the call returns one response, never an iterator.
+                response = cast("CreateChatCompletionResponse", llm.create_chat_completion(messages=messages, **kwargs))
                 return clean_response(response["choices"][0]["message"]["content"] or "")
             except Exception:
                 continue
@@ -225,14 +227,17 @@ class LlamaCppSummarizer(Summarizer):
 
     def _complete(self, system_prompt: str, user_prompt: str) -> str:
         llm = self._get_llm()
-        response = llm.create_chat_completion(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            # Prompt and completion share n_ctx: cap the answer so the model
-            # cannot be cut off mid-sentence by its own prompt.
-            max_tokens=self.completion_reserve(),
+        response = cast(
+            "CreateChatCompletionResponse",
+            llm.create_chat_completion(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                # Prompt and completion share n_ctx: cap the answer so the model
+                # cannot be cut off mid-sentence by its own prompt.
+                max_tokens=self.completion_reserve(),
+            ),
         )
         return clean_response(response["choices"][0]["message"]["content"] or "")
 
@@ -240,10 +245,13 @@ class LlamaCppSummarizer(Summarizer):
         from ownscribe.summarization.prompts import TITLE_PROMPT, TITLE_SYSTEM
 
         llm = self._get_llm()
-        response = llm.create_chat_completion(
-            messages=[
-                {"role": "system", "content": TITLE_SYSTEM},
-                {"role": "user", "content": TITLE_PROMPT.format(summary=summary_text)},
-            ],
+        response = cast(
+            "CreateChatCompletionResponse",
+            llm.create_chat_completion(
+                messages=[
+                    {"role": "system", "content": TITLE_SYSTEM},
+                    {"role": "user", "content": TITLE_PROMPT.format(summary=summary_text)},
+                ],
+            ),
         )
         return clean_response(response["choices"][0]["message"]["content"] or "").strip()
