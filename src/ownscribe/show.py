@@ -60,8 +60,9 @@ class Turn:
 def folder_title(name: str) -> str:
     """Display title for a meeting folder name.
 
-    The same rules as the app's `MeetingLoader.prettyTitle`, which still names
-    folders when the app runs an older CLI; both are tested against the same cases.
+    The same rules as the app's `FolderName.title` (macapp/Sources/Logic), which
+    still names folders when the app runs an older CLI; both are tested against
+    the same cases.
 
       `260609-q2-sales-review`          -> `Q2 Sales Review`
       `260609-standup_1630`             -> `Standup`          (collision suffix)

@@ -19,8 +19,8 @@ from ownscribe.output.markdown import format_summary, format_transcript
 from ownscribe.show import build_turns, folder_day, folder_title, meeting_detail, meeting_rows, speaker_stats
 from ownscribe.transcription.models import Segment, TranscriptResult
 
-# The app's prettyTitle must agree with this table: the app and the CLI must
-# name a folder the same way.
+# Shared with FolderNameTests in macapp/Tests/LogicTests: the app and the CLI
+# must name a folder the same way.
 FOLDER_TITLES = [
     ("260609-q2-sales-review", "Q2 Sales Review"),
     ("260609-standup_1630", "Standup"),

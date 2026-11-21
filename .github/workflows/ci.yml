@@ -46,6 +46,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # The app's Foundation-only logic (macapp/Sources/Logic) has a SwiftPM
+      # package of its own so it can be unit-tested; build-app.sh cannot run tests.
+      - name: Test the app's logic
+        run: swift test --package-path macapp
       - name: Build Ownscribe.app
         run: bash macapp/build-app.sh
       - name: Build a side-by-side variant
