@@ -364,7 +364,9 @@ def run_pipeline(config: Config, title: str | None = None) -> None:
 
     recorder.start(audio_path)
     start_time = time.time()
-    emit_event("recording_started", silence_timeout=config.audio.silence_timeout)
+    # `folder` is the meeting folder this run owns. A GUI keeps it out of its library
+    # until meeting_saved names where it ended up (a summary title renames it).
+    emit_event("recording_started", silence_timeout=config.audio.silence_timeout, folder=str(out_dir))
 
     old_termios = None
     if can_mute and is_tty:
