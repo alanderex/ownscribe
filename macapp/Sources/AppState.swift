@@ -328,9 +328,15 @@ final class AppState: ObservableObject {
             return
         }
 
-        // The pipeline may rename its folder with a generated slug, so resolve
-        // the meeting by newest-folder rather than parsing a (possibly stale) path.
-        guard let meeting = MeetingLoader.mostRecent(in: MeetingLoader.outputDir(config)) else {
+        // meeting_saved names the folder after any title rename. A CLI too old to
+        // send it leaves only a guess: the newest folder in the output directory.
+        let meeting: Meeting?
+        if let folder = ProgressEvent.lastMeetingSaved(in: result.stderr)?.folder {
+            meeting = MeetingLoader.meeting(at: URL(fileURLWithPath: folder))
+        } else {
+            meeting = MeetingLoader.mostRecent(in: MeetingLoader.outputDir(config))
+        }
+        guard let meeting else {
             phase = .failed("Finished, but no meeting folder was found in \(config.output.dir).")
             return
         }
