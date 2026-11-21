@@ -12,6 +12,8 @@ final class Library {
     private(set) var rows: [LibraryRow] = []
     /// Why the last listing failed, while it keeps failing.
     private(set) var listFailure: String?
+    /// Summary text by folder path, for the search field.
+    private(set) var summaries: [String: String] = [:]
     let calendar = LibraryCalendar()
 
     private(set) var recentMeetings: [Meeting] = []
@@ -56,6 +58,7 @@ final class Library {
                 do {
                     rows = try await Task.detached { try LibraryListing.decode(data) }.value
                     listFailure = nil
+                    await indexSummaries()
                 } catch {
                     listFailure = "Couldn't read the meeting list: \(error)"
                 }
@@ -69,6 +72,18 @@ final class Library {
                 listRows()
             }
         }
+    }
+
+    /// Read every summary off the main actor so search never touches the disk.
+    private func indexSummaries() async {
+        let folders = rows.filter(\.status.hasSummary).map(\.url)
+        summaries = await Task.detached {
+            var index: [String: String] = [:]
+            for folder in folders {
+                if let text = SummaryFile.text(inFolder: folder) { index[folder.path] = text }
+            }
+            return index
+        }.value
     }
 
     private func watchOutputFolder() {

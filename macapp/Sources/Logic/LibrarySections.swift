@@ -73,3 +73,14 @@ struct LibraryCalendar {
         return formatter
     }()
 }
+
+/// The toolbar search: a case-insensitive substring of the title or the summary.
+/// Transcript text is not searched.
+enum LibrarySearch {
+    static func matches(_ row: LibraryRow, query: String, summary: String?) -> Bool {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return true }
+        if row.title.localizedCaseInsensitiveContains(needle) { return true }
+        return summary?.localizedCaseInsensitiveContains(needle) ?? false
+    }
+}

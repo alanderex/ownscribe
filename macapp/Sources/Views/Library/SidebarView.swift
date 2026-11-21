@@ -5,6 +5,7 @@ struct SidebarView: View {
     @Environment(Recorder.self) private var recorder
     @Environment(Jobs.self) private var jobs
     @Binding var selection: SidebarItem?
+    let query: String
     @State private var trashFailure: String?
 
     var body: some View {
@@ -16,7 +17,11 @@ struct SidebarView: View {
                 }
             }
             Section("Library") {
-                ForEach(library.calendar.sections(library.rows)) { section in
+                if sections.isEmpty && !query.isEmpty {
+                    Text("No titles or summaries match “\(query)”.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(sections) { section in
                     Text(DayTitle.text(for: section.day, calendar: library.calendar.calendar))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -53,6 +58,13 @@ struct SidebarView: View {
                 trashFailure = error.localizedDescription
             }
         }
+    }
+
+    private var sections: [DaySection] {
+        let matching = library.rows.filter {
+            LibrarySearch.matches($0, query: query, summary: library.summaries[$0.path])
+        }
+        return library.calendar.sections(matching)
     }
 
     private var hasActiveRun: Bool {

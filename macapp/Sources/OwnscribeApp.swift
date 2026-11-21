@@ -95,6 +95,7 @@ struct MainWindowScene: Scene {
                 .frame(minWidth: 760, minHeight: 520)
         }
         .defaultSize(width: 1100, height: 720)
+        .commands { LibraryCommands() }
     }
 }
 

@@ -11,15 +11,28 @@ enum SidebarItem: Hashable {
 struct MainWindow: View {
     @Environment(Library.self) private var library
     @State private var selection: SidebarItem?
+    @State private var query = ""
+    @FocusState private var searchFocused: Bool
     @AppStorage("mainWindow.sidebarVisible") private var sidebarVisible = true
 
     var body: some View {
         NavigationSplitView(columnVisibility: columnVisibility) {
-            SidebarView(selection: $selection)
+            SidebarView(selection: $selection, query: query)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 250, max: 380)
         } detail: {
             DetailPane(selection: selection)
         }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                TextField("Search titles and summaries", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 240)
+                    .focused($searchFocused)
+                    .onExitCommand { query = ""; searchFocused = false }
+                    .accessibilityLabel("Search meetings")
+            }
+        }
+        .focusedSceneValue(\.focusSearch, FocusSearchAction { searchFocused = true })
     }
 
     private var columnVisibility: Binding<NavigationSplitViewVisibility> {
@@ -53,6 +66,35 @@ private struct DetailPane: View {
             } else {
                 EmptyLibraryView()
             }
+        }
+    }
+}
+
+/// Lets the Find menu command (⌘F) focus the window's search field. macOS 14 has
+/// no API to focus a `.searchable` field, so the field is a plain TextField.
+struct FocusSearchAction {
+    let focus: () -> Void
+}
+
+private struct FocusSearchKey: FocusedValueKey {
+    typealias Value = FocusSearchAction
+}
+
+extension FocusedValues {
+    var focusSearch: FocusSearchAction? {
+        get { self[FocusSearchKey.self] }
+        set { self[FocusSearchKey.self] = newValue }
+    }
+}
+
+struct LibraryCommands: Commands {
+    @FocusedValue(\.focusSearch) private var focusSearch
+
+    var body: some Commands {
+        CommandGroup(after: .textEditing) {
+            Button("Find…") { focusSearch?.focus() }
+                .keyboardShortcut("f")
+                .disabled(focusSearch == nil)
         }
     }
 }
