@@ -20,6 +20,7 @@ struct MeetingDetailView: View {
     /// nil until chosen: the summary when there is one, the transcript otherwise.
     @State private var chosenTab: Tab?
     @State private var namingSkipped: Set<String> = []
+    @State private var player = TurnPlayer()
 
     var body: some View {
         ScrollView {
@@ -40,7 +41,16 @@ struct MeetingDetailView: View {
             .padding(28)
             .frame(maxWidth: .infinity)
         }
-        .task(id: row) { await load() }
+        .task(id: row) {
+            player.stop()
+            await load()
+        }
+        .onDisappear { player.stop() }
+    }
+
+    /// The CLI's word on the recording: the fresh document's when loaded.
+    private var playback: Playback {
+        Playback(audioPath: document?.status.audio ?? row.status.audio)
     }
 
     private var tab: Tab {
@@ -56,6 +66,13 @@ struct MeetingDetailView: View {
             .labelsHidden()
             .fixedSize()
             Spacer()
+            if tab == .transcript, player.playingTurn != nil {
+                Button {
+                    player.stop()
+                } label: {
+                    Label("Stop Playback", systemImage: "stop.fill")
+                }
+            }
             if tab == .transcript, let document, !document.turns.isEmpty {
                 Button {
                     NSPasteboard.general.clearContents()
@@ -99,7 +116,12 @@ struct MeetingDetailView: View {
                 Text("No transcript for this meeting.")
                     .foregroundStyle(.secondary)
             } else {
-                TranscriptView(document: document)
+                if let reason = playback.unavailableReason {
+                    Text(reason)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                TranscriptView(document: document, playingTurn: player.playingTurn, play: playAction)
             }
         } else if let documentFailure {
             Label(documentFailure, systemImage: "exclamationmark.triangle")
@@ -107,6 +129,12 @@ struct MeetingDetailView: View {
         } else {
             ProgressView().controlSize(.small)
         }
+    }
+
+    /// nil when the recording cannot be played, so turns offer no playback at all.
+    private var playAction: ((MeetingDocument.Turn) -> Void)? {
+        guard let url = playback.url else { return nil }
+        return { turn in player.play(url, from: turn.start, turn: turn.ordinal) }
     }
 
     private func load() async {

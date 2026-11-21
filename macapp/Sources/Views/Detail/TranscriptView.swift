@@ -1,13 +1,21 @@
 import SwiftUI
 
-/// The transcript as turns: who spoke, when, and what was said.
+/// The transcript as turns: who spoke, when, and what was said. With a playable
+/// recording, a turn plays from its start when clicked, or with Space when focused.
 struct TranscriptView: View {
     let document: MeetingDocument
+    let playingTurn: Int?
+    let play: ((MeetingDocument.Turn) -> Void)?
 
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 16) {
             ForEach(document.turns) { turn in
-                TurnView(turn: turn, color: SpeakerColors.color(for: turn.speaker, in: document))
+                TurnView(
+                    turn: turn,
+                    color: SpeakerColors.color(for: turn.speaker, in: document),
+                    isPlaying: playingTurn == turn.ordinal,
+                    play: play.map { action in { action(turn) } }
+                )
             }
         }
     }
@@ -16,12 +24,14 @@ struct TranscriptView: View {
 private struct TurnView: View {
     let turn: MeetingDocument.Turn
     let color: Color
+    let isPlaying: Bool
+    let play: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             RoundedRectangle(cornerRadius: 1.5)
                 .fill(color)
-                .frame(width: 3)
+                .frame(width: isPlaying ? 5 : 3)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
@@ -32,15 +42,31 @@ private struct TurnView: View {
                     Text(ClockText.duration(turn.start))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
+                    if isPlaying {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.caption)
+                            .foregroundStyle(.tint)
+                            .accessibilityHidden(true)
+                    }
                 }
                 Text(turn.text)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .contentShape(Rectangle())
+        // Simultaneous, so selecting the turn's text still works.
+        .simultaneousGesture(TapGesture().onEnded { play?() })
         .focusable()
+        .onKeyPress(.space) {
+            guard let play else { return .ignored }
+            play()
+            return .handled
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
+        .accessibilityAction(named: "Play from here") { play?() }
+        .help(play == nil ? "" : "Click to play from \(ClockText.duration(turn.start))")
     }
 
     private var accessibilityText: String {
