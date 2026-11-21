@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+import time
+from datetime import date
 from unittest import mock
 
 import pytest
@@ -12,7 +16,7 @@ from ownscribe.cli import cli
 from ownscribe.config import Config
 from ownscribe.output.json_output import format_summary_json, format_transcript_json
 from ownscribe.output.markdown import format_summary, format_transcript
-from ownscribe.show import build_turns, folder_title, meeting_detail, speaker_stats
+from ownscribe.show import build_turns, folder_day, folder_title, meeting_detail, meeting_rows, speaker_stats
 from ownscribe.transcription.models import Segment, TranscriptResult
 
 # Shared with the app's prettyTitle tests (macapp/Tests/LogicTests): both
@@ -68,6 +72,26 @@ class TestFolderTitle:
     @pytest.mark.parametrize(("name", "title"), FOLDER_TITLES)
     def test_title(self, name, title):
         assert folder_title(name) == title
+
+
+class TestFolderDay:
+    @pytest.mark.parametrize(
+        ("name", "day"),
+        [
+            ("260101-budget-review", date(2026, 1, 1)),
+            ("260902-060902-heidelberg", date(2026, 9, 2)),
+            ("2026-06-16-su-screener", date(2026, 6, 16)),
+            ("2026-06-18_1400", date(2026, 6, 18)),
+            ("2026-06-09_1053_q2-sales-review", date(2026, 6, 9)),
+            ("2026-06-18", date(2026, 6, 18)),
+            ("261399-not-a-date", None),
+            ("20260616-eight-digits", None),
+            ("260101", None),
+            ("notes", None),
+        ],
+    )
+    def test_day(self, name, day):
+        assert folder_day(name) == day
 
 
 class TestBuildTurns:
@@ -207,6 +231,93 @@ class TestMeetingDetail:
         assert meeting_detail(config, folder)["status"]["audio"] is None
 
 
+class TestMeetingRows:
+    def test_one_row_per_meeting_folder(self, config, meeting):
+        titled = _folder(config, "260102-budget-review")
+        (titled / "transcript.md").write_text(format_transcript(meeting))
+        (titled / "summary.md").write_text(format_summary("We agreed."))
+        untitled = _folder(config, "260101-1400")
+        (untitled / "recording.wav").write_bytes(b"")
+        _folder(config, ".hidden")
+        (config.output.resolved_dir / "stray.txt").write_text("not a meeting")
+
+        payload = meeting_rows(config)
+
+        assert payload["schema"] == 1
+        rows = payload["meetings"]
+        assert [r["path"] for r in rows] == [str(untitled), str(titled)]
+        first, second = rows
+        assert first["name_day"] == "2026-01-01"
+        assert first["title"] == "260101-1400"
+        assert first["duration"] is None
+        assert first["speaker_count"] == 0
+        assert first["status"]["transcript"] == "missing"
+        assert first["status"]["audio"] == str(untitled / "recording.wav")
+        assert second["title"] == "Budget Review"
+        assert second["duration"] == 40.0
+        assert second["speaker_count"] == 2
+        assert second["status"]["summary"] == "present"
+        assert first["created"] is not None and first["created"][:4].isdigit()
+
+    def test_missing_output_dir_is_an_empty_library(self, config):
+        assert meeting_rows(config) == {"schema": 1, "meetings": []}
+
+    def test_two_hundred_hour_long_meetings_list_fast(self, config):
+        """The plan's budget for `show --list`: 300 ms for 200 folders."""
+        segments = []
+        for i in range(700):  # about one hour of whisper segments
+            speaker = f"SPEAKER_0{(i // 4) % 3}"  # runs of four, three speakers
+            segments.append(
+                Segment(
+                    text=f"Sentence number {i} about the quarterly plan.",
+                    start=i * 5.0,
+                    end=i * 5.0 + 4.0,
+                    speaker=speaker,
+                )
+            )
+        transcript = format_transcript(TranscriptResult(segments=segments, language="en", duration=3500.0))
+        for n in range(200):
+            folder = _folder(config, f"26{n // 28 + 1:02d}{n % 28 + 1:02d}-meeting-{n}")
+            (folder / "transcript.md").write_text(transcript)
+            (folder / "summary.md").write_text(format_summary("Summary."))
+            (folder / "recording.wav").write_bytes(b"")
+
+        started = time.perf_counter()
+        rows = meeting_rows(config)["meetings"]
+        elapsed = time.perf_counter() - started
+
+        assert len(rows) == 200
+        assert all(r["speaker_count"] == 3 for r in rows)
+        assert elapsed < 0.3, f"show --list took {elapsed * 1000:.0f} ms for 200 folders"
+
+    def test_does_not_import_the_ml_stacks(self, tmp_path):
+        """The app runs `show --list` on every refresh; it must stay a light process."""
+        notes = tmp_path / "notes"
+        (notes / "260101-standup").mkdir(parents=True)
+        config_file = tmp_path / "config.toml"
+        config_file.write_text(f'[output]\ndir = "{notes}"\n')
+        code = f"""
+import sys
+from pathlib import Path
+import ownscribe.config as cfg
+cfg.CONFIG_PATH = Path({str(config_file)!r})
+from click.testing import CliRunner
+from ownscribe.cli import cli
+result = CliRunner().invoke(cli, ["show", "--list", "--json"])
+assert result.exit_code == 0, result.output
+heavy = {{"torch", "whisperx", "pyannote", "llama_cpp", "openai", "ollama"}}
+backends = {{
+    "ownscribe.transcription.whisperx_transcriber",
+    "ownscribe.summarization.llama_cpp_summarizer",
+    "ownscribe.summarization.ollama_summarizer",
+    "ownscribe.summarization.openai_summarizer",
+}}
+print(sorted(m for m in sys.modules if m.split(".")[0] in heavy or m in backends))
+"""
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+        assert out.stdout.strip() == "[]"
+
+
 class TestShowCommand:
     def test_prints_the_detail_as_json(self, config, meeting):
         folder = _folder(config)
@@ -234,3 +345,29 @@ class TestShowCommand:
             result = CliRunner().invoke(cli, ["show", str(tmp_path / "nope"), "--json"])
 
         assert result.exit_code == 2
+
+    def test_list_prints_rows(self, config, meeting):
+        folder = _folder(config)
+        (folder / "transcript.md").write_text(format_transcript(meeting))
+
+        with mock.patch("ownscribe.cli.Config.load", return_value=config):
+            result = CliRunner().invoke(cli, ["show", "--list", "--json"])
+
+        assert result.exit_code == 0, result.output
+        assert [r["title"] for r in json.loads(result.output)["meetings"]] == ["Budget Review"]
+
+    def test_list_and_directory_are_exclusive(self, config):
+        folder = _folder(config)
+
+        with mock.patch("ownscribe.cli.Config.load", return_value=config):
+            result = CliRunner().invoke(cli, ["show", str(folder), "--list", "--json"])
+
+        assert result.exit_code == 2
+        assert "not both" in result.output
+
+    def test_needs_a_directory_or_list(self, config):
+        with mock.patch("ownscribe.cli.Config.load", return_value=config):
+            result = CliRunner().invoke(cli, ["show", "--json"])
+
+        assert result.exit_code == 2
+        assert "DIRECTORY" in result.output

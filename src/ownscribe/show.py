@@ -11,7 +11,9 @@ Nothing here may import the transcription or summarization stacks: the app runs
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from datetime import date, datetime
 from itertools import pairwise
 from pathlib import Path
 
@@ -29,6 +31,11 @@ _TRANSCRIPT_NAMES = ("transcript.json", "transcript.md")
 
 # The one-time copies `edit-speakers` keeps before it first renames speakers.
 _ORIGINAL_NAMES = ("transcript.json.orig", "transcript.md.orig", "summary.json.orig", "summary.md.orig")
+
+# Folder names start with the meeting's day: `YYMMDD-…` from this version, and
+# `YYYY-MM-DD` followed by `_` or `-` from older versions and hand-named folders.
+_SHORT_DAY_RE = re.compile(r"^(?P<y>\d{2})(?P<m>\d{2})(?P<d>\d{2})-")
+_LONG_DAY_RE = re.compile(r"^(?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2})(?:[-_]|$)")
 
 _DIGITS = frozenset("0123456789")
 
@@ -73,6 +80,20 @@ def folder_title(name: str) -> str:
     if len(rest) == 1 and len(rest[0]) in (4, 6) and _all_digits(rest[0]):
         return name
     return _capitalize_words(" ".join(rest))
+
+
+def folder_day(name: str) -> date | None:
+    """The meeting day at the start of a folder name, or None when there is none."""
+    if m := _SHORT_DAY_RE.match(name):
+        year = 2000 + int(m["y"])
+    elif m := _LONG_DAY_RE.match(name):
+        year = int(m["y"])
+    else:
+        return None
+    try:
+        return date(year, int(m["m"]), int(m["d"]))
+    except ValueError:
+        return None
 
 
 def build_turns(result: TranscriptResult) -> list[Turn]:
@@ -155,6 +176,45 @@ def meeting_detail(config: Config, directory: Path) -> dict:
         "speakers": speaker_stats(turns),
         "status": _status(config, directory),
     }
+
+
+def meeting_rows(config: Config) -> dict:
+    """One row per meeting folder in the output directory, for the app's library.
+
+    A folder is any non-hidden directory there, including ones holding only audio
+    or only crash leftovers: the app decides what each status means. A missing
+    output directory is an empty library, not an error; nothing has been
+    recorded yet.
+    """
+    base = config.output.resolved_dir
+    folders = sorted(p for p in base.iterdir() if p.is_dir() and not p.name.startswith(".")) if base.is_dir() else []
+    return {"schema": SCHEMA_VERSION, "meetings": [_row(config, folder) for folder in folders]}
+
+
+def _row(config: Config, folder: Path) -> dict:
+    result = _read_transcript(folder)
+    day = folder_day(folder.name)
+    return {
+        "path": str(folder),
+        "name_day": day.isoformat() if day else None,
+        "created": _created(folder),
+        "title": folder_title(folder.name),
+        "duration": _duration(result),
+        "speaker_count": len(speaker_stats(build_turns(result))) if result else 0,
+        "status": _status(config, folder),
+    }
+
+
+def _created(folder: Path) -> str | None:
+    """The folder's creation time as local ISO 8601, or None where the OS keeps none.
+
+    Copying a folder (cp, ditto, rsync) resets it, which is why the day in the
+    name comes first.
+    """
+    birth = getattr(folder.stat(), "st_birthtime", None)
+    if birth is None:
+        return None
+    return datetime.fromtimestamp(birth).astimezone().isoformat(timespec="seconds")
 
 
 def _read_transcript(directory: Path) -> TranscriptResult | None:
