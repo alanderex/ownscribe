@@ -9,7 +9,6 @@ import SwiftUI
 /// TabView collapses these into a "Navigation Tab Bar" overflow menu instead of
 /// showing tabs.
 struct SettingsView: View {
-    @EnvironmentObject var app: AppState
     @State private var tab: Tab = .general
 
     enum Tab: String, CaseIterable, Identifiable {
@@ -50,7 +49,7 @@ struct SettingsView: View {
 // MARK: - Tabs
 
 private struct GeneralTab: View {
-    @EnvironmentObject var app: AppState
+    @Environment(Engine.self) private var engine
 
     private static let configURL = FileManager.default
         .homeDirectoryForCurrentUser
@@ -60,17 +59,17 @@ private struct GeneralTab: View {
         Form {
             LaunchAtLoginRow()
             Divider()
-            Picker("Default capture", selection: app.boolBinding(\.audio.mic, key: "audio.mic")) {
+            Picker("Default capture", selection: engine.boolBinding(\.audio.mic, key: "audio.mic")) {
                 Text("System only").tag(false)
                 Text("System + Mic").tag(true)
             }
-            Picker("Source picker", selection: app.stringBinding(\.audio.captureMode, key: "audio.capture_mode")) {
+            Picker("Source picker", selection: engine.stringBinding(\.audio.captureMode, key: "audio.capture_mode")) {
                 Text("Show picker each time").tag("picker")
                 Text("Capture all system audio").tag("all")
             }
             Stepper(
-                "Silence auto-stop: \(app.config.audio.silenceTimeout)s",
-                value: app.intBinding(\.audio.silenceTimeout, key: "audio.silence_timeout"),
+                "Silence auto-stop: \(engine.config.audio.silenceTimeout)s",
+                value: engine.intBinding(\.audio.silenceTimeout, key: "audio.silence_timeout"),
                 in: 0...3600, step: 30
             )
             Divider()
@@ -78,7 +77,7 @@ private struct GeneralTab: View {
                 ConfigTextField(title: "Output folder", key: "output.dir", keyPath: \.output.dir)
                 Button("Choose…") { chooseOutputFolder() }
             }
-            Toggle("Keep WAV recordings", isOn: app.boolBinding(\.output.keepRecording, key: "output.keep_recording"))
+            Toggle("Keep WAV recordings", isOn: engine.boolBinding(\.output.keepRecording, key: "output.keep_recording"))
             Divider()
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -103,24 +102,24 @@ private struct GeneralTab: View {
         panel.allowsMultipleSelection = false
         panel.prompt = "Use Folder"
         if panel.runModal() == .OK, let url = panel.url {
-            app.updateConfig("output.dir", url.path)
+            engine.updateConfig("output.dir", url.path)
         }
     }
 }
 
 private struct TranscriptionTab: View {
-    @EnvironmentObject var app: AppState
+    @Environment(Engine.self) private var engine
 
     private var modelOptions: [String] {
-        let current = app.config.transcription.model
-        return app.availableModels.contains(current) ? app.availableModels : app.availableModels + [current]
+        let current = engine.config.transcription.model
+        return engine.availableModels.contains(current) ? engine.availableModels : engine.availableModels + [current]
     }
 
     /// Language presets minus the "auto" pseudo-entry; include the configured
     /// code if it isn't one of the presets so the picker never shows blank.
     private var languageOptions: [(label: String, code: String)] {
-        var options = Array(app.availableLanguages.dropFirst())
-        let current = app.config.transcription.language
+        var options = Array(engine.availableLanguages.dropFirst())
+        let current = engine.config.transcription.language
         if !current.isEmpty && !options.contains(where: { $0.code == current }) {
             options.append((current, current))
         }
@@ -129,10 +128,10 @@ private struct TranscriptionTab: View {
 
     var body: some View {
         Form {
-            Picker("Default model", selection: app.stringBinding(\.transcription.model, key: "transcription.model")) {
+            Picker("Default model", selection: engine.stringBinding(\.transcription.model, key: "transcription.model")) {
                 ForEach(modelOptions, id: \.self) { Text($0).tag($0) }
             }
-            Picker("Default language", selection: app.stringBinding(\.transcription.language, key: "transcription.language")) {
+            Picker("Default language", selection: engine.stringBinding(\.transcription.language, key: "transcription.language")) {
                 Text("Auto-detect").tag("")
                 ForEach(languageOptions, id: \.code) { lang in
                     Text(lang.label).tag(lang.code)
@@ -146,17 +145,17 @@ private struct TranscriptionTab: View {
 }
 
 private struct SummarizationTab: View {
-    @EnvironmentObject var app: AppState
+    @Environment(Engine.self) private var engine
 
-    private var backend: String { app.config.summarization.backend }
-    private var enabled: Bool { app.config.summarization.enabled }
+    private var backend: String { engine.config.summarization.backend }
+    private var enabled: Bool { engine.config.summarization.enabled }
 
     var body: some View {
         Form {
             Toggle("Summarize after transcription",
-                   isOn: app.boolBinding(\.summarization.enabled, key: "summarization.enabled"))
+                   isOn: engine.boolBinding(\.summarization.enabled, key: "summarization.enabled"))
             if enabled {
-                Picker("Backend", selection: app.stringBinding(\.summarization.backend, key: "summarization.backend")) {
+                Picker("Backend", selection: engine.stringBinding(\.summarization.backend, key: "summarization.backend")) {
                     Text("Local (built-in)").tag("local")
                     Text("Ollama").tag("ollama")
                     Text("OpenAI-compatible").tag("openai")
@@ -175,7 +174,7 @@ private struct SummarizationTab: View {
                     )
                 }
                 Picker("Template", selection: templateBinding) {
-                    ForEach(app.availableTemplates, id: \.self) { Text($0.capitalized).tag($0) }
+                    ForEach(engine.availableTemplates, id: \.self) { Text($0.capitalized).tag($0) }
                 }
             } else {
                 Text("Recordings will be transcribed only — no summary is generated.")
@@ -188,23 +187,23 @@ private struct SummarizationTab: View {
     /// config stores "" to mean the default template; present that as "meeting".
     private var templateBinding: Binding<String> {
         Binding(
-            get: { app.config.summarization.template.isEmpty ? "meeting" : app.config.summarization.template },
-            set: { app.updateConfig("summarization.template", $0) }
+            get: { engine.config.summarization.template.isEmpty ? "meeting" : engine.config.summarization.template },
+            set: { engine.updateConfig("summarization.template", $0) }
         )
     }
 }
 
 private struct DiarizationTab: View {
-    @EnvironmentObject var app: AppState
+    @Environment(Engine.self) private var engine
 
     var body: some View {
         Form {
-            Toggle("Enable speaker diarization", isOn: app.boolBinding(\.diarization.enabled, key: "diarization.enabled"))
+            Toggle("Enable speaker diarization", isOn: engine.boolBinding(\.diarization.enabled, key: "diarization.enabled"))
             ConfigTextField(
                 title: "HF token", key: "diarization.hf_token", keyPath: \.diarization.hfToken,
                 secure: true, help: "Set once. Needed for pyannote speaker diarization."
             )
-            Picker("Device", selection: app.stringBinding(\.diarization.device, key: "diarization.device")) {
+            Picker("Device", selection: engine.stringBinding(\.diarization.device, key: "diarization.device")) {
                 Text("Auto").tag("auto")
                 Text("GPU (MPS)").tag("mps")
                 Text("CPU").tag("cpu")
@@ -216,7 +215,7 @@ private struct DiarizationTab: View {
 // MARK: - Reusable text field (commit on Enter or the Set button)
 
 private struct ConfigTextField: View {
-    @EnvironmentObject var app: AppState
+    @Environment(Engine.self) private var engine
     let title: String
     let key: String
     let keyPath: WritableKeyPath<OwnscribeConfig, String>
@@ -226,7 +225,7 @@ private struct ConfigTextField: View {
 
     /// True when a value for this secret is stored. `config get` blanks the value
     /// itself, so presence is reported separately.
-    private var secretIsSet: Bool { app.config.secretsSet?[key] == true }
+    private var secretIsSet: Bool { engine.config.secretsSet?[key] == true }
 
     private var effectiveHelp: String? {
         // Secrets come back redacted (blank), so say whether one is stored — otherwise
@@ -261,21 +260,21 @@ private struct ConfigTextField: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .onAppear { draft = app.config[keyPath: keyPath] }
-        .onChange(of: app.config[keyPath: keyPath]) { _, newValue in draft = newValue }
+        .onAppear { draft = engine.config[keyPath: keyPath] }
+        .onChange(of: engine.config[keyPath: keyPath]) { _, newValue in draft = newValue }
     }
 
     private func commit() {
         // Never overwrite a stored secret with a blank (the field starts blank
         // because `config get` redacts secrets).
         if secure && draft.isEmpty { return }
-        app.updateConfig(key, draft)
+        engine.updateConfig(key, draft)
     }
 }
 
 // MARK: - Config bindings (each set persists via `config set` + reload)
 
-extension AppState {
+extension Engine {
     func stringBinding(_ keyPath: WritableKeyPath<OwnscribeConfig, String>, key: String) -> Binding<String> {
         Binding(
             get: { self.config[keyPath: keyPath] },

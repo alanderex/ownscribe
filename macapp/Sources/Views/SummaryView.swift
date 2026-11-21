@@ -3,12 +3,12 @@ import SwiftUI
 /// Shown after a meeting finishes (or when a recent one is opened): the summary,
 /// optional speaker naming (when diarized), and Copy / Reveal / New actions.
 struct SummaryView: View {
-    @EnvironmentObject var app: AppState
+    @Environment(Library.self) private var library
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
-                Button { app.backToIdle() } label: {
+                Button { library.closeMeeting() } label: {
                     Label("Back", systemImage: "chevron.left")
                 }
                 .buttonStyle(.borderless)
@@ -16,14 +16,14 @@ struct SummaryView: View {
                 Spacer()
             }
 
-            if let meeting = app.currentMeeting {
+            if let meeting = library.currentMeeting {
                 Text(meeting.title)
                     .font(.headline)
                     .lineLimit(2)
             }
 
-            if !app.detectedSpeakers.isEmpty && !app.speakersNamed {
-                SpeakerNamingView(labels: app.detectedSpeakers)
+            if !library.detectedSpeakers.isEmpty && !library.speakersNamed {
+                SpeakerNamingView(labels: library.detectedSpeakers)
                 Divider()
             }
 
@@ -34,23 +34,23 @@ struct SummaryView: View {
     }
 
     private var summaryBody: some View {
-        RenderedMarkdown(text: app.summaryText)
+        RenderedMarkdown(text: library.summaryText)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var actions: some View {
         HStack {
-            Button { app.copySummary() } label: {
+            Button { library.copySummary() } label: {
                 Label("Copy", systemImage: "doc.on.doc")
             }
-            if let meeting = app.currentMeeting {
-                Button { app.revealInFinder(meeting) } label: {
+            if let meeting = library.currentMeeting {
+                Button { library.revealInFinder(meeting) } label: {
                     Label("Reveal", systemImage: "folder")
                 }
             }
             Spacer()
-            Button { app.backToIdle() } label: {
+            Button { library.closeMeeting() } label: {
                 Label("New", systemImage: "plus")
             }
             .buttonStyle(.borderedProminent)

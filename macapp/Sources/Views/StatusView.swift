@@ -2,14 +2,15 @@ import SwiftUI
 
 /// Shown while recording (timer + Stop) and while processing (spinner).
 struct StatusView: View {
-    @EnvironmentObject var app: AppState
+    @Environment(Engine.self) private var engine
+    @Environment(Recorder.self) private var recorder
+    @Environment(Jobs.self) private var jobs
 
     var body: some View {
         VStack(spacing: 18) {
-            switch app.phase {
-            case .recording:
+            if recorder.isRecording {
                 recording
-            default:
+            } else {
                 processing
             }
         }
@@ -24,15 +25,13 @@ struct StatusView: View {
                 .foregroundStyle(.red)
                 .symbolEffect(.pulse, options: .repeating)
 
-            Text(AppState.formatElapsed(app.elapsed))
-                .font(.system(size: 34, weight: .semibold, design: .monospaced))
-                .monospacedDigit()
+            ElapsedText()
 
-            Text(app.captureMic ? "Capturing system audio + mic" : "Capturing system audio")
+            Text(engine.captureMic ? "Capturing system audio + mic" : "Capturing system audio")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Button(action: app.stopRecording) {
+            Button(action: recorder.stop) {
                 Label("Stop & Transcribe", systemImage: "stop.circle")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
@@ -45,12 +44,12 @@ struct StatusView: View {
 
     private var processing: some View {
         VStack(spacing: 10) {
-            if app.autoStopped {
+            if jobs.autoStopped {
                 Label("Stopped after silence", systemImage: "moon.zzz")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            if app.steps.isEmpty {
+            if jobs.steps.isEmpty {
                 // No events yet — the CLI is still starting up, or is an older build
                 // without OWNSCRIBE_PROGRESS_EVENTS support.
                 ProgressView().controlSize(.large)
@@ -61,13 +60,13 @@ struct StatusView: View {
                     .multilineTextAlignment(.center)
             } else {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(app.steps) { step in
+                    ForEach(jobs.steps) { step in
                         StepRow(step: step)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Button(role: .destructive, action: app.cancelProcessing) {
+            Button(role: .destructive, action: jobs.cancel) {
                 Text("Cancel")
             }
             .buttonStyle(.bordered)
@@ -76,10 +75,22 @@ struct StatusView: View {
     }
 }
 
+/// The recording timer. Its own view so the once-a-second change redraws only
+/// this text.
+private struct ElapsedText: View {
+    @Environment(Recorder.self) private var recorder
+
+    var body: some View {
+        Text(Recorder.formatElapsed(recorder.elapsed))
+            .font(.system(size: 34, weight: .semibold, design: .monospaced))
+            .monospacedDigit()
+    }
+}
+
 /// One checklist row: status glyph, label, and a determinate bar when the step
 /// reports a fraction.
 private struct StepRow: View {
-    let step: AppState.PipelineStep
+    let step: PipelineStep
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {

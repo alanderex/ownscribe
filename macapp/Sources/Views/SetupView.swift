@@ -2,10 +2,8 @@ import SwiftUI
 
 /// First-run: ownscribe isn't installed yet, so the app is setting up its own managed
 /// environment (a venv under Application Support, populated with `uv`). Shown while
-/// `AppState.install()` runs.
+/// `Engine.install()` runs.
 struct InstallingView: View {
-    @EnvironmentObject var app: AppState
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Setting up Ownscribe", systemImage: "arrow.down.circle")

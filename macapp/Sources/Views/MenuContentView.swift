@@ -1,8 +1,12 @@
 import SwiftUI
 
-/// Root of the menu-bar popover. Switches content on the app phase.
+/// Root of the menu-bar popover. Shows the most pressing state: setup, a failure,
+/// a running recording or job, an open meeting, or the idle recorder.
 struct MenuContentView: View {
-    @EnvironmentObject var app: AppState
+    @Environment(Engine.self) private var engine
+    @Environment(Recorder.self) private var recorder
+    @Environment(Jobs.self) private var jobs
+    @Environment(Library.self) private var library
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -38,33 +42,33 @@ struct MenuContentView: View {
 
     @ViewBuilder
     private var statusBadge: some View {
-        switch app.phase {
-        case .recording:
+        if recorder.isRecording {
             Label("Recording", systemImage: "record.circle.fill")
                 .foregroundStyle(.red)
                 .font(.caption)
-        case .processing:
+        } else if jobs.isRunning {
             Label("Processing", systemImage: "hourglass")
                 .foregroundStyle(.secondary)
                 .font(.caption)
-        default:
-            EmptyView()
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        switch app.phase {
-        case .installing:
+        if engine.isInstalling {
             InstallingView()
-        case .idle:
-            IdleView()
-        case .recording, .processing:
+        } else if let message = engine.setupFailure {
+            FailedView(message: message, permission: nil)
+        } else if let permission = engine.permissionFailure {
+            FailedView(message: permission.message, permission: permission)
+        } else if recorder.isRecording || jobs.isRunning {
             StatusView()
-        case .done:
+        } else if case .failed(let message) = jobs.state {
+            FailedView(message: message, permission: nil)
+        } else if library.currentMeeting != nil {
             SummaryView()
-        case .failed(let message):
-            FailedView(message: message)
+        } else {
+            IdleView()
         }
     }
 
@@ -77,7 +81,7 @@ struct MenuContentView: View {
                 Label("Settings", systemImage: "gearshape")
             }
             .buttonStyle(.borderless)
-            .disabled(!app.cli.isInstalled)
+            .disabled(!engine.cli.isInstalled)
 
             Spacer()
 
@@ -92,13 +96,14 @@ struct MenuContentView: View {
 
 /// Idle: quick-bar + record button + recent meetings.
 private struct IdleView: View {
-    @EnvironmentObject var app: AppState
+    @Environment(Recorder.self) private var recorder
+    @Environment(Library.self) private var library
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             QuickBarView()
 
-            Button(action: app.startRecording) {
+            Button(action: recorder.start) {
                 Label("Start Recording", systemImage: "record.circle")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
@@ -106,7 +111,7 @@ private struct IdleView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
 
-            if !app.recentMeetings.isEmpty {
+            if !library.recentMeetings.isEmpty {
                 RecentView()
             }
         }
@@ -114,14 +119,16 @@ private struct IdleView: View {
 }
 
 private struct FailedView: View {
-    @EnvironmentObject var app: AppState
+    @Environment(Engine.self) private var engine
+    @Environment(Jobs.self) private var jobs
     let message: String
+    let permission: Engine.PermissionFailure?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(
-                app.isPermissionFailure ? "Permission needed" : "Something went wrong",
-                systemImage: app.isPermissionFailure
+                permission != nil ? "Permission needed" : "Something went wrong",
+                systemImage: permission != nil
                     ? "lock.shield" : "exclamationmark.triangle.fill"
             )
             .foregroundStyle(.orange)
@@ -132,14 +139,16 @@ private struct FailedView: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
-                // The pane is several levels deep in System Settings and the app
-                // cannot grant this itself, so offer the shortcut rather than prose.
-                if app.isPermissionFailure {
-                    Button("Open Settings") { app.openPermissionSettings() }
+                if let permission {
+                    Button("Open Settings") { permission.openSettings() }
                         .buttonStyle(.borderedProminent)
                 }
-                Button("Back") { app.backToIdle() }
-                    .buttonStyle(.bordered)
+                Button("Back") {
+                    engine.setupFailure = nil
+                    engine.permissionFailure = nil
+                    jobs.dismissFailure()
+                }
+                .buttonStyle(.bordered)
             }
         }
     }
