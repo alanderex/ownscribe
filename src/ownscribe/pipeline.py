@@ -624,6 +624,7 @@ def run_summarize(config: Config, transcript_file: str) -> None:
 
     click.echo(f"\n{summary_md}")
     click.echo(f"Summary saved to {summary_path}")
+    _emit_meeting_saved(out_dir, "ok")
 
 
 def _do_transcribe_and_summarize(
@@ -756,6 +757,26 @@ def _do_transcribe_and_summarize(
             audio_path.parent.rmdir()
         click.echo(f"Recording deleted (keep_recording=false): {audio_path}")
 
+    if not sum_enabled:
+        summary_state = "disabled"
+    elif sum_unavailable:
+        summary_state = "unavailable"
+    elif sum_failed:
+        summary_state = "failed"
+    else:
+        summary_state = "ok"
+    _emit_meeting_saved(out_dir, summary_state)
+
+
+def _emit_meeting_saved(folder: Path, summary: str) -> None:
+    """The last event of every successful run.
+
+    `folder` is where the meeting ended up after any title rename; a GUI that
+    watched recording_started's folder maps it here. `summary` is ok, failed,
+    unavailable (backend not reachable) or disabled.
+    """
+    emit_event("meeting_saved", folder=str(folder), summary=summary)
+
 
 _AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".webm"}
 # Video containers whose audio track ffmpeg/WhisperX can decode (e.g. meeting recordings).
@@ -834,6 +855,7 @@ def run_resume(config: Config, directory: str) -> None:
 
     if transcript and summary:
         click.echo("Nothing to resume — transcript and summary already exist.")
+        _emit_meeting_saved(dir_path, "ok")
         return
 
     if not audio and not transcript:

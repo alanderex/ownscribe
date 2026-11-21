@@ -1420,3 +1420,117 @@ class TestSecondsDisambiguatedDirectories:
         d.mkdir()
 
         assert _rename_output_dir(d, "standup").name == "260902-standup_1402"
+
+
+class TestMeetingSavedEvent:
+    """meeting_saved closes every successful run and names the final folder."""
+
+    @staticmethod
+    def _events(capsys) -> list[dict]:
+        events = []
+        for line in capsys.readouterr().err.splitlines():
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(obj, dict) and "ownscribe_progress" in obj:
+                events.append(obj)
+        return events
+
+    @staticmethod
+    def _summarizer(*, available: bool = True, fails: bool = False, title: str = "Q2 Sales Review"):
+        summarizer = mock.MagicMock()
+        summarizer.is_available.return_value = available
+        if fails:
+            summarizer.summarize.side_effect = RuntimeError("model crashed")
+        else:
+            summarizer.summarize.return_value = "## Summary\nGood meeting."
+        summarizer.generate_title.return_value = title
+        return summarizer
+
+    def _transcribe(self, tmp_path, config: Config, summarizer=None):
+        from ownscribe.pipeline import _do_transcribe_and_summarize
+
+        out_dir = tmp_path / "notes" / "260101-1200"
+        out_dir.mkdir(parents=True)
+        audio_path = out_dir / "recording.wav"
+        audio_path.write_bytes(b"audio")
+        transcriber = mock.MagicMock()
+        transcriber.transcribe.return_value = TranscriptResult(
+            segments=[Segment(text="Hello.", start=0.0, end=1.0)], language="en", duration=1.0
+        )
+        with (
+            mock.patch("ownscribe.pipeline._create_transcriber", return_value=transcriber),
+            mock.patch("ownscribe.pipeline.create_summarizer", return_value=summarizer or self._summarizer()),
+            mock.patch("ownscribe.pipeline._needs_model_download", return_value=False),
+            mock.patch("ownscribe.summarization.llama_cpp_summarizer._ensure_model"),
+        ):
+            _do_transcribe_and_summarize(config, audio_path, out_dir)
+        return out_dir
+
+    def test_last_event_carries_the_renamed_folder(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setenv("OWNSCRIBE_PROGRESS_EVENTS", "1")
+        out_dir = self._transcribe(tmp_path, Config())
+
+        events = self._events(capsys)
+        assert events[-1]["event"] == "meeting_saved"
+        assert events[-1]["folder"] == str(out_dir.parent / "260101-q2-sales-review")
+        assert events[-1]["summary"] == "ok"
+
+    def test_summarization_disabled(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setenv("OWNSCRIBE_PROGRESS_EVENTS", "1")
+        config = Config()
+        config.summarization.enabled = False
+        out_dir = self._transcribe(tmp_path, config)
+
+        saved = self._events(capsys)[-1]
+        assert saved == {**saved, "event": "meeting_saved", "folder": str(out_dir), "summary": "disabled"}
+
+    def test_summarizer_unavailable(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setenv("OWNSCRIBE_PROGRESS_EVENTS", "1")
+        self._transcribe(tmp_path, Config(), self._summarizer(available=False))
+
+        assert self._events(capsys)[-1]["summary"] == "unavailable"
+
+    def test_summary_failed(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setenv("OWNSCRIBE_PROGRESS_EVENTS", "1")
+        out_dir = self._transcribe(tmp_path, Config(), self._summarizer(fails=True))
+
+        saved = self._events(capsys)[-1]
+        assert saved["summary"] == "failed"
+        assert saved["folder"] == str(out_dir)
+
+    def test_summarize_only_resume(self, tmp_path, capsys, monkeypatch):
+        from ownscribe.pipeline import run_resume
+
+        monkeypatch.setenv("OWNSCRIBE_PROGRESS_EVENTS", "1")
+        folder = tmp_path / "notes" / "260101-1200"
+        folder.mkdir(parents=True)
+        (folder / "transcript.md").write_text("# Transcript\n\n[00:00] Hello.\n")
+        config = Config()
+        config.output.dir = str(tmp_path / "notes")
+
+        with (
+            mock.patch("ownscribe.pipeline.create_summarizer", return_value=self._summarizer()),
+            mock.patch("ownscribe.pipeline._needs_model_download", return_value=False),
+            mock.patch("ownscribe.summarization.llama_cpp_summarizer._ensure_model"),
+        ):
+            run_resume(config, str(folder))
+
+        saved = self._events(capsys)[-1]
+        assert saved["event"] == "meeting_saved"
+        assert saved["folder"] == str(folder.parent / "260101-q2-sales-review")
+        assert saved["summary"] == "ok"
+
+    def test_nothing_to_resume(self, tmp_path, capsys, monkeypatch):
+        from ownscribe.pipeline import run_resume
+
+        monkeypatch.setenv("OWNSCRIBE_PROGRESS_EVENTS", "1")
+        (tmp_path / "transcript.md").write_text("# Transcript\n\n[00:00] Hello.\n")
+        (tmp_path / "summary.md").write_text("# Meeting Summary\n\nDone.\n")
+
+        run_resume(Config(), str(tmp_path))
+
+        assert self._events(capsys) == [
+            {"ownscribe_progress": 1, "event": "meeting_saved", "folder": str(tmp_path), "summary": "ok"}
+        ]
