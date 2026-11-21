@@ -22,10 +22,20 @@ final class OwnscribeCLI {
         let base = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        let name = (Bundle.main.object(forInfoDictionaryKey: "OWSManagedRootName") as? String)
-            .flatMap { $0.isEmpty ? nil : $0 } ?? "Ownscribe"
-        return base.appendingPathComponent(name, isDirectory: true)
+        return base.appendingPathComponent(managedRootName, isDirectory: true)
     }
+
+    private static let stableRootName = "Ownscribe"
+
+    private static var managedRootName: String {
+        (Bundle.main.object(forInfoDictionaryKey: "OWSManagedRootName") as? String)
+            .flatMap { $0.isEmpty ? nil : $0 } ?? stableRootName
+    }
+
+    /// True for a side-by-side build (`build-app.sh --variant`), the only kind that
+    /// honours `cliSpecOverrideKey`. Keyed off the managed root because that is what
+    /// keeps a variant's environment apart from the stable app's.
+    static var isVariantBuild: Bool { managedRootName != stableRootName }
 
     private var venvDir: URL { Self.managedRoot.appendingPathComponent(".venv", isDirectory: true) }
 
@@ -46,9 +56,9 @@ final class OwnscribeCLI {
     /// then bump the ref below in the same commit that bumps CFBundleShortVersionString
     /// in build-app.sh.
     ///
-    /// Never move an existing tag. needsUpgrade compares this string against the one
-    /// recorded beside the installed venv, so a moved tag leaves every existing
-    /// install on the CLI it already had while claiming to be current. v0.15.1 was
+    /// Never move an existing tag. needsUpgrade compares the spec built from it with
+    /// the one recorded beside the installed venv, so a moved tag leaves every
+    /// existing install on the CLI it already had while claiming to be current. v0.15.1 was
     /// moved several times during development; every tag from v0.15.2 on is fixed.
     ///
     /// Bump this whenever a Python-side change must reach installed apps — the tag
@@ -65,6 +75,30 @@ final class OwnscribeCLI {
     private static let pipSpec =
         "ownscribe[all] @ git+https://github.com/alanderex/ownscribe@\(macappRelease)"
 
+    /// `defaults` key with a pip requirement that a variant build installs instead of
+    /// the release tag, so an unreleased CLI can be tried before its tag exists:
+    ///
+    ///     defaults write dev.p4l.ownscribe.menubar.next OWNSCRIBE_CLI_SPEC \
+    ///       "ownscribe[all] @ file:///path/to/checkout"
+    ///
+    /// A `defaults` key rather than an environment variable: `open`, which
+    /// build-app.sh --run uses, does not pass the environment to the app. The stable
+    /// build ignores it, so a stray key can never change what users run.
+    static let cliSpecOverrideKey = "OWNSCRIBE_CLI_SPEC"
+
+    /// What install() installs and the stamp must match: the override in a variant
+    /// build that sets one, the release tag otherwise. Removing the key therefore
+    /// triggers a normal upgrade back to the tag.
+    static var installSpec: String {
+        if isVariantBuild,
+           let override = UserDefaults.standard.string(forKey: cliSpecOverrideKey)?
+               .trimmingCharacters(in: .whitespacesAndNewlines),
+           !override.isEmpty {
+            return override
+        }
+        return pipSpec
+    }
+
     /// The ownscribe console script in the managed venv, if installed. Running it directly
     /// (not via a shell) lets us deliver SIGINT to the real Python process for a clean Stop.
     var cliURL: URL? {
@@ -74,11 +108,12 @@ final class OwnscribeCLI {
 
     var isInstalled: Bool { cliURL != nil }
 
-    /// Ref recorded alongside the venv at install time. Compared against
-    /// macappRelease to notice that a newer app bundle wants a newer CLI.
+    /// Spec recorded alongside the venv at install time. Compared against
+    /// installSpec to notice that the app wants a different CLI. Stamps written
+    /// before this held only the tag name, so those installs upgrade once.
     private var stampURL: URL { Self.managedRoot.appendingPathComponent("installed-ref") }
 
-    private var installedRelease: String? {
+    private var installedSpec: String? {
         try? String(contentsOf: stampURL, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -91,11 +126,11 @@ final class OwnscribeCLI {
     /// stamp predates this check and is treated as needing an upgrade.
     var needsUpgrade: Bool {
         guard isInstalled else { return false }
-        return installedRelease != Self.macappRelease
+        return installedSpec != Self.installSpec
     }
 
-    private func recordInstalledRelease() {
-        try? Self.macappRelease.write(to: stampURL, atomically: true, encoding: .utf8)
+    private func recordInstalled(_ spec: String) {
+        try? spec.write(to: stampURL, atomically: true, encoding: .utf8)
     }
 
     @discardableResult
@@ -132,21 +167,25 @@ final class OwnscribeCLI {
     func install() async -> CommandResult {
         try? FileManager.default.createDirectory(
             at: Self.managedRoot, withIntermediateDirectories: true)
+        // Read once: the stamp must name what was actually installed.
+        let spec = Self.installSpec
+        // The venv path and the spec are passed as $1 and $2, never spliced into the
+        // script: the override is free text and must not be read as shell.
         let script = """
         set -e
         if ! command -v uv >/dev/null 2>&1; then
           echo "uv is required but was not found. Install it from https://docs.astral.sh/uv/ (e.g. 'brew install uv')." >&2
           exit 127
         fi
-        [ -x "\(venvDir.path)/bin/python" ] || uv venv "\(venvDir.path)"
-        uv pip install --reinstall-package ownscribe --python "\(venvDir.path)/bin/python" "\(Self.pipSpec)"
+        [ -x "$1/bin/python" ] || uv venv "$1"
+        uv pip install --reinstall-package ownscribe --python "$1/bin/python" "$2"
         """
         let result = await CommandRunner.run(
             executable: URL(fileURLWithPath: "/bin/zsh"),
-            args: ["-lc", script],
+            args: ["-lc", script, "ownscribe-install", venvDir.path, spec],
             cwd: Self.managedRoot
         )
-        if result.ok { recordInstalledRelease() }
+        if result.ok { recordInstalled(spec) }
         return result
     }
 

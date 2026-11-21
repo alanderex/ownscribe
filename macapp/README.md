@@ -78,6 +78,25 @@ costs far less disk than a full copy of torch.
 To promote a variant to stable: rebuild without `--variant`, and delete
 `~/Library/Application Support/Ownscribe Next` when you no longer need it.
 
+### Trying an unreleased CLI in a variant
+
+A variant installs the CLI from the release tag in `OwnscribeCLI.macappRelease`,
+like the stable app. To try a CLI change before its tag exists, point the
+variant's `OWNSCRIBE_CLI_SPEC` default at any pip requirement, such as your
+checkout:
+
+```bash
+defaults write dev.p4l.ownscribe.menubar.next OWNSCRIBE_CLI_SPEC "ownscribe[all] @ file://$PWD"
+```
+
+The variant reinstalls ownscribe from that spec the next time it starts, and
+records the spec it installed. Delete the key to go back to the tag; the next
+start then upgrades normally. The stable build ignores the key.
+
+```bash
+defaults delete dev.p4l.ownscribe.menubar.next OWNSCRIBE_CLI_SPEC
+```
+
 ## Build & run
 
 Two options — both produce the same app.
