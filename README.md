@@ -86,9 +86,11 @@ Works with any app that outputs audio through Core Audio (Zoom, Teams, Meet, etc
 
 ## Menu-bar app (macOS)
 
-A native SwiftUI menu-bar app lives in [`macapp/`](macapp/README.md). It drives
-this CLI as a subprocess — config, recordings and output are shared — and renders
-live pipeline progress. See `macapp/README.md` for building it.
+A native SwiftUI app lives in [`macapp/`](macapp/README.md): a recorder in the
+menu bar and a window with your meetings, their summaries and transcripts, and
+playback from any transcript turn. It drives this CLI as a subprocess — config,
+recordings and output are shared — and renders live pipeline progress. See
+`macapp/README.md` for building it.
 
 ## Installation
 

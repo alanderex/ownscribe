@@ -107,6 +107,7 @@ alone. Xcode itself still has to be installed — see Requirements.
 
 ```bash
 ./macapp/build-app.sh --run     # builds macapp/build/Ownscribe.app and opens it
+swift test --package-path macapp  # unit tests for the app's logic (Sources/Logic)
 ```
 
 > The app is **ad-hoc signed** by default, so macOS resets its Screen Recording /
@@ -190,20 +191,36 @@ missing Screen Recording grant for the app.
   has already begun transcribing. The CLI still honors `silence_timeout`.
 - **Quitting mid-recording** signals the pipeline to stop (releasing the mic /
   CoreAudio tap); transcription of whatever was captured then finishes headless.
-- **Recent meeting resolution** after a recording uses the newest folder under
-  the output directory (the pipeline renames its folder with a title slug).
+- **Finding the finished meeting** uses the folder the CLI names in its
+  `meeting_saved` event (after the title rename). Only an older CLI without that
+  event falls back to the newest folder under the output directory.
 
 ## How it works
 
-- **Quick bar** (per-run): capture source, Whisper model, language, template,
+- **Menu bar = recorder.** Start/Stop with a timer, the options for the next
+  recording (collapsed), the five newest meetings, and "Open Ownscribe". When a
+  run finishes nothing takes focus: the menu shows "Ready · Open" and the icon
+  gets a dot until the meeting is opened.
+- **Window = workspace.** Opened from the menu; it never opens at launch, and the
+  app shows a Dock icon only while a window is open. The sidebar holds the run in
+  progress (its steps, Cancel, or its error) and the library by day, from
+  `ownscribe show --list --json`, refreshed on changes in the output folder. The
+  detail pane shows a meeting's summary or transcript (from `ownscribe show DIR
+  --json`); clicking a turn plays the recording from there. The toolbar has Record
+  (▾ for the options) and a search field for titles and summaries (⌘F).
+- **Options** (per-run): title, capture source, Whisper model, language, template,
   and — when diarization is enabled — speaker count. These are passed as CLI
   flags for that recording only; they don't rewrite config.
-- **Settings** (defaults, rarely changed): backend/model/host/API key, HF token,
-  diarization, output folder. Each control writes via `ownscribe config set`.
+- **Settings** (defaults, rarely changed, ⌘,): backend/model/host/API key, HF
+  token, diarization, output folder. Each control writes via `ownscribe config set`.
 - **Recording**: launches the full `ownscribe` pipeline; **Stop** sends `SIGINT`,
-  which stops recording and lets it continue to transcribe + summarize.
-- **Speaker naming** (after a diarized meeting): names the detected
-  `SPEAKER_xx` labels via `ownscribe rename-speakers` (transcript only).
+  which stops recording ("Finalizing…" while the tracks merge) and lets it
+  continue to transcribe + summarize.
+- **Speaker naming**: a meeting with unnamed `SPEAKER_xx` labels shows a naming
+  form above its transcript; it renames via `ownscribe rename-speakers`.
+- **Upgrades**: a new app bundle upgrades the CLI at launch, but never while a
+  process runs from its environment. Until the upgrade lands (or if it fails),
+  the app keeps recording on the old CLI and says so.
 
 ## Project layout
 
@@ -214,13 +231,18 @@ macapp/
   make-signing-cert.sh        one-time stable signing identity (persistent TCC grants)
   Resources/Info.plist        LSUIElement (menu-bar only) + mic & screen-recording strings
   Resources/Ownscribe.entitlements
+  Package.swift               SwiftPM package for Sources/Logic and its tests only
   Sources/
-    OwnscribeApp.swift        @main: MenuBarExtra + Settings window
-    AppState.swift            state machine + CLI orchestration
+    OwnscribeApp.swift        @main: picks the App type; menu bar, window, Settings
+    Model/                    Engine, Recorder, Jobs, Library (@Observable),
+                              AppModel, WindowCoordinator, TurnPlayer
+    Logic/                    Foundation-only logic, unit-tested: events, library
+                              rows, folder names, playback formats, …
     Core/                     CommandRunner, OwnscribeCLI, ConfigModel,
-                              Meeting, Permissions
-    Views/                    MenuContent, QuickBar, Status, Summary,
-                              SpeakerNaming, Recent, Setup, Settings
+                              Meeting, Permissions, DirectoryWatcher
+    Views/                    menu content, window, Library/ (sidebar),
+                              Detail/ (summary, transcript), Settings
+  Tests/LogicTests/           XCTest for Sources/Logic
 ```
 
 `Ownscribe.xcodeproj` is generated and git-ignored; regenerate it any time with
