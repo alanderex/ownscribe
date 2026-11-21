@@ -180,6 +180,6 @@ final class Jobs {
         }
         state = .idle
         library.show(meeting)
-        library.refreshRecents()
+        library.refresh()
     }
 }

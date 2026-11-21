@@ -66,8 +66,9 @@ final class Engine {
     let availableTemplates = ["meeting", "lecture", "brief"]
 
     let cli = OwnscribeCLI()
-    /// Called after setup has loaded the config, so meetings can be listed.
-    @ObservationIgnored var onReady: (() -> Void)?
+    /// Called after every successful config load: at setup, and after a Settings
+    /// change, which may have moved the output folder.
+    @ObservationIgnored var onConfigLoaded: (() -> Void)?
     @ObservationIgnored private var didBootstrap = false
     @ObservationIgnored private var configWrite: Task<Void, Never> = Task {}
 
@@ -102,7 +103,6 @@ final class Engine {
         // in a new .app silently never reached the user.
         if cli.needsUpgrade { await install(); return }
         await reloadConfig(seedQuickBar: true)
-        onReady?()
     }
 
     /// First-run setup, and the upgrade path when the app expects a newer CLI.
@@ -116,7 +116,6 @@ final class Engine {
             return
         }
         await reloadConfig(seedQuickBar: true)
-        onReady?()
         isInstalling = false
     }
 
@@ -125,6 +124,7 @@ final class Engine {
             config = try await cli.loadConfig()
             if seed { seedQuickBarFromConfig() }
             isInstalling = false
+            onConfigLoaded?()
         } catch {
             setupFailure = "Couldn't read ownscribe config: \(error)"
         }

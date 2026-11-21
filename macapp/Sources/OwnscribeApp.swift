@@ -1,44 +1,122 @@
+import AppKit
 import SwiftUI
 
+/// Chooses the App type for this system.
+///
+/// The main window must not open at launch. On macOS 15+ the scene says so with
+/// `.defaultLaunchBehavior(.suppressed)`. That modifier cannot be applied
+/// conditionally inside one scene list (SceneBuilder accepts a bare `if #available`
+/// with no else branch), so each case gets its own App type. The compiler check
+/// keeps the macOS 14 SDK, which lacks the modifier, building.
 @main
-struct OwnscribeApp: App {
-    @State private var engine: Engine
-    @State private var library: Library
-    @State private var jobs: Jobs
-    @State private var recorder: Recorder
-
-    init() {
-        let engine = Engine()
-        let library = Library(engine: engine)
-        let jobs = Jobs(engine: engine, library: library)
-        let recorder = Recorder(engine: engine, jobs: jobs, library: library)
-        engine.onReady = { [weak library] in library?.refreshRecents() }
-        _engine = State(initialValue: engine)
-        _library = State(initialValue: library)
-        _jobs = State(initialValue: jobs)
-        _recorder = State(initialValue: recorder)
-        // Here and not in the popover's .task: MenuBarExtra builds its content only
-        // when the menu is first opened, so setup, an upgrade and loading the
-        // config used to wait for that first click.
-        Task { await engine.bootstrap() }
+enum OwnscribeMain {
+    static func main() {
+        #if compiler(>=6.0)
+        if #available(macOS 15, *) {
+            OwnscribeApp15.main()
+            return
+        }
+        #endif
+        AppDelegate.closesMainWindowAtLaunch = true
+        OwnscribeApp.main()
     }
+}
+
+/// macOS 14, or a build without the macOS 15 SDK: the delegate closes a main window
+/// SwiftUI presents at launch. Checked on macOS 27 by forcing a launch-time window;
+/// macOS 14 itself has not been observed.
+struct OwnscribeApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @State private var model = AppModel()
+
+    var body: some Scene {
+        MenuBarScene(model: model)
+        MainWindowScene(model: model)
+        SettingsScene(model: model)
+    }
+}
+
+#if compiler(>=6.0)
+@available(macOS 15, *)
+struct OwnscribeApp15: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @State private var model = AppModel()
+
+    var body: some Scene {
+        MenuBarScene(model: model)
+        MainWindowScene(model: model)
+            .defaultLaunchBehavior(.suppressed)
+        SettingsScene(model: model)
+    }
+}
+#endif
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Set when the running App type cannot suppress the main window itself.
+    @MainActor static var closesMainWindowAtLaunch = false
+
+    @MainActor
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard Self.closesMainWindowAtLaunch else { return }
+        // SwiftUI has created the window by now, and its content has not appeared.
+        for window in NSApp.windows
+        where window.isVisible && window.identifier?.rawValue.hasPrefix(WindowID.main) == true {
+            window.close()
+        }
+    }
+
+    /// A menu-bar app keeps running with no window open.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+}
+
+struct MenuBarScene: Scene {
+    let model: AppModel
 
     var body: some Scene {
         MenuBarExtra {
             MenuContentView()
-                .environment(engine)
-                .environment(recorder)
-                .environment(jobs)
-                .environment(library)
+                .modelEnvironment(model)
         } label: {
-            MenuBarIcon(engine: engine, recorder: recorder, jobs: jobs)
+            MenuBarIcon(engine: model.engine, recorder: model.recorder, jobs: model.jobs)
         }
         .menuBarExtraStyle(.window)
+    }
+}
 
-        Window("Ownscribe Settings", id: "settings") {
+struct MainWindowScene: Scene {
+    let model: AppModel
+
+    var body: some Scene {
+        Window("Ownscribe", id: WindowID.main) {
+            MainWindow()
+                .modelEnvironment(model)
+                .frame(minWidth: 760, minHeight: 520)
+        }
+        .defaultSize(width: 1100, height: 720)
+    }
+}
+
+struct SettingsScene: Scene {
+    let model: AppModel
+
+    var body: some Scene {
+        Window("Ownscribe Settings", id: WindowID.settings) {
             SettingsView()
-                .environment(engine)
+                .environment(model.engine)
         }
         .windowResizability(.contentSize)
+    }
+}
+
+extension View {
+    /// Every state object, for views anywhere in a scene.
+    func modelEnvironment(_ model: AppModel) -> some View {
+        environment(model.engine)
+            .environment(model.recorder)
+            .environment(model.jobs)
+            .environment(model.library)
+            .environment(model.windows)
     }
 }

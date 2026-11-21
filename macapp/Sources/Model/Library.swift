@@ -2,11 +2,18 @@ import AppKit
 import Foundation
 import Observation
 
-/// Meetings on disk: the recent list and the one being looked at, with its
-/// summary text and speaker labels.
+/// Meetings on disk: every folder as `show --list` describes it, the popover's
+/// recent list, and the meeting the popover is showing, with its summary text and
+/// speaker labels.
 @MainActor
 @Observable
 final class Library {
+    /// Every meeting folder, from `ownscribe show --list --json`.
+    private(set) var rows: [LibraryRow] = []
+    /// Why the last listing failed, while it keeps failing.
+    private(set) var listFailure: String?
+    let calendar = LibraryCalendar()
+
     private(set) var recentMeetings: [Meeting] = []
     private(set) var currentMeeting: Meeting?
     private(set) var summaryText = ""
@@ -14,9 +21,62 @@ final class Library {
     var speakersNamed = false
 
     private let engine: Engine
+    @ObservationIgnored private var watcher: DirectoryWatcher?
+    @ObservationIgnored private var listing = false
+    @ObservationIgnored private var listAgain = false
 
     init(engine: Engine) {
         self.engine = engine
+        // Folders can change while the app is in the background (Finder, a terminal
+        // run); look again whenever the user comes back.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
+    }
+
+    /// Reload everything listed from disk.
+    func refresh() {
+        refreshRecents()
+        listRows()
+        watchOutputFolder()
+    }
+
+    /// One `show --list` at a time; a request that arrives meanwhile runs once
+    /// the current one is done, so a burst of changes costs at most two runs.
+    private func listRows() {
+        guard engine.cli.isInstalled else { return }
+        if listing { listAgain = true; return }
+        listing = true
+        Task {
+            let result = await engine.cli.run(["show", "--list", "--json"])
+            if result.ok {
+                let data = Data(result.stdout.utf8)
+                do {
+                    rows = try await Task.detached { try LibraryListing.decode(data) }.value
+                    listFailure = nil
+                } catch {
+                    listFailure = "Couldn't read the meeting list: \(error)"
+                }
+            } else {
+                listFailure = FailureText.firstMeaningfulLine(result.stderr)
+                    ?? "Listing meetings failed (exit \(result.exitCode))."
+            }
+            listing = false
+            if listAgain {
+                listAgain = false
+                listRows()
+            }
+        }
+    }
+
+    private func watchOutputFolder() {
+        let folder = MeetingLoader.outputDir(engine.config)
+        guard watcher?.url != folder else { return }
+        watcher = DirectoryWatcher(url: folder) { [weak self] in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
     }
 
     func show(_ meeting: Meeting) {

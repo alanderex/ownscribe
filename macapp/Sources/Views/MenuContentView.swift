@@ -7,6 +7,7 @@ struct MenuContentView: View {
     @Environment(Recorder.self) private var recorder
     @Environment(Jobs.self) private var jobs
     @Environment(Library.self) private var library
+    @Environment(WindowCoordinator.self) private var windows
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -75,8 +76,14 @@ struct MenuContentView: View {
     private var footer: some View {
         HStack {
             Button {
-                openWindow(id: "settings")
-                NSApp.activate(ignoringOtherApps: true)
+                windows.open(WindowID.main, with: openWindow)
+            } label: {
+                Label("Open Ownscribe", systemImage: "macwindow")
+            }
+            .buttonStyle(.borderless)
+
+            Button {
+                windows.open(WindowID.settings, with: openWindow)
             } label: {
                 Label("Settings", systemImage: "gearshape")
             }
