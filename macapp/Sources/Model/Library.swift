@@ -47,19 +47,10 @@ final class Library {
         if isListing { listAgain = true; return }
         isListing = true
         Task {
-            let result = await engine.cli.run(["show", "--list", "--json"])
-            if result.ok {
-                let data = Data(result.stdout.utf8)
-                do {
-                    rows = try await Task.detached { try LibraryListing.decode(data) }.value
-                    listFailure = nil
-                    await indexSummaries()
-                } catch {
-                    listFailure = "Couldn't read the meeting list: \(error)"
-                }
+            if engine.isDegraded {
+                await listFoldersPlainly()
             } else {
-                listFailure = FailureText.firstMeaningfulLine(result.stderr)
-                    ?? "Listing meetings failed (exit \(result.exitCode))."
+                await listWithShow()
             }
             isListing = false
             if listAgain {
@@ -67,6 +58,46 @@ final class Library {
                 listRows()
             }
         }
+    }
+
+    private func listWithShow() async {
+        let result = await engine.cli.run(["show", "--list", "--json"])
+        if result.ok {
+            let data = Data(result.stdout.utf8)
+            do {
+                rows = try await Task.detached { try LibraryListing.decode(data) }.value
+                listFailure = nil
+                await indexSummaries()
+            } catch {
+                listFailure = "Couldn't read the meeting list: \(error)"
+            }
+        } else {
+            listFailure = FailureText.firstMeaningfulLine(result.stderr)
+                ?? "Listing meetings failed (exit \(result.exitCode))."
+        }
+    }
+
+    /// On a CLI too old for `show`: the folders MeetingLoader finds, newest change
+    /// first, with no duration, speakers or audio.
+    private func listFoldersPlainly() async {
+        let folder = MeetingLoader.outputDir(engine.config)
+        let meetings = await Task.detached { MeetingLoader.load(from: folder) }.value
+        rows = meetings.map(Self.plainRow)
+        listFailure = nil
+        await indexSummaries()
+    }
+
+    private static func plainRow(_ meeting: Meeting) -> LibraryRow {
+        LibraryRow(
+            path: meeting.url.path, nameDay: nil,
+            created: ISO8601DateFormatter().string(from: meeting.date),
+            title: meeting.title, duration: nil, speakerCount: 0,
+            status: .init(
+                transcript: meeting.transcriptURL == nil ? "missing" : "present",
+                summary: meeting.summaryURL == nil ? "missing" : "present",
+                audio: nil, orig: false
+            )
+        )
     }
 
     /// Read every summary off the main actor so search never touches the disk.

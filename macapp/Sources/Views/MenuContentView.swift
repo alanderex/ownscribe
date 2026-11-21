@@ -16,8 +16,11 @@ struct MenuContentView: View {
             header
             Divider()
             ScrollView {
-                content
-                    .padding(12)
+                VStack(alignment: .leading, spacing: 12) {
+                    DegradedBanner()
+                    content
+                }
+                .padding(12)
             }
             // A definite height is required: inside a self-sizing MenuBarExtra(.window)
             // popover the system proposes no height, so a maxHeight-only ScrollView

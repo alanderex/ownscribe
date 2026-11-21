@@ -48,6 +48,8 @@ final class Jobs {
 
     /// Called when the run stops capturing audio: recording_stopped, an exit, or Cancel.
     @ObservationIgnored var onCaptureEnded: (() -> Void)?
+    /// Called when the process is gone: it exited or was cancelled.
+    @ObservationIgnored var onRunEnded: (() -> Void)?
 
     private let engine: Engine
     private let library: Library
@@ -114,6 +116,7 @@ final class Jobs {
         ownedFolder = nil
         state = .idle
         onCaptureEnded?()
+        onRunEnded?()
     }
 
     func dismissFailure() {
@@ -175,6 +178,7 @@ final class Jobs {
         running = nil
         ownedFolder = nil
         onCaptureEnded?()
+        defer { onRunEnded?() }
 
         guard result.ok else {
             state = .failed(FailureText.firstMeaningfulLine(result.stderr)

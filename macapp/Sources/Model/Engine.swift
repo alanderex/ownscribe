@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -7,6 +8,17 @@ import Observation
 @MainActor
 @Observable
 final class Engine {
+    /// An upgrade the app wants but has not made. Until it is made the app runs on
+    /// the CLI it has: recording works, but nothing newer than that CLI does.
+    enum Upgrade: Equatable {
+        case none
+        /// A process still runs from the environment; reinstalling under it could
+        /// break it, so the upgrade waits.
+        case pending
+        /// The install failed; uv leaves the old CLI runnable when that happens.
+        case failed(String)
+    }
+
     /// A privacy grant that is missing, found when a recording was about to start.
     enum PermissionFailure: Equatable {
         case screenRecording
@@ -44,6 +56,7 @@ final class Engine {
 
     /// True while the managed CLI is being installed or upgraded.
     private(set) var isInstalling: Bool
+    private(set) var upgrade: Upgrade = .none
     /// Why setup or reading the config failed, until the user dismisses it.
     var setupFailure: String?
     var permissionFailure: PermissionFailure?
@@ -71,10 +84,20 @@ final class Engine {
     @ObservationIgnored var onConfigLoaded: (() -> Void)?
     @ObservationIgnored private var didBootstrap = false
     @ObservationIgnored private var configWrite: Task<Void, Never> = Task {}
+    @ObservationIgnored private var pendingCheck: Timer?
 
     init() {
         isInstalling = !cli.isInstalled
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.upgradeIfPending() }
+        }
     }
+
+    /// Running on an older CLI than this app expects: `show` and the transcript
+    /// view may not exist there.
+    var isDegraded: Bool { upgrade != .none }
 
     var diarizationEnabled: Bool { config.diarization.enabled }
 
@@ -101,22 +124,76 @@ final class Engine {
         // A newer app bundle expects a newer CLI. Without this the managed venv
         // stayed on whatever it first installed, so every Python-side fix shipped
         // in a new .app silently never reached the user.
-        if cli.needsUpgrade { await install(); return }
+        if cli.needsUpgrade {
+            await upgradeWhenIdle()
+            if isDegraded { await reloadConfig(seedQuickBar: true) }
+            return
+        }
         await reloadConfig(seedQuickBar: true)
     }
 
     /// First-run setup, and the upgrade path when the app expects a newer CLI.
     func install() async {
+        let hadCLI = cli.isInstalled
         isInstalling = true
         let result = await cli.install()
         guard result.ok, cli.isInstalled else {
             isInstalling = false
-            setupFailure = "Couldn't set up ownscribe.\n"
-                + (FailureText.firstMeaningfulLine(result.stderr) ?? "Install failed — is `uv` installed?")
+            let reason = FailureText.firstMeaningfulLine(result.stderr) ?? "Install failed — is `uv` installed?"
+            if hadCLI && cli.isInstalled {
+                // The old CLI still runs, so keep recording on it rather than stopping.
+                setUpgrade(.failed(reason))
+                await reloadConfig(seedQuickBar: true)
+            } else {
+                setupFailure = "Couldn't set up ownscribe.\n" + reason
+            }
             return
         }
+        setUpgrade(.none)
         await reloadConfig(seedQuickBar: true)
         isInstalling = false
+    }
+
+    /// Retry a failed upgrade, or try a pending one now.
+    func retryUpgrade() {
+        Task { await upgradeWhenIdle() }
+    }
+
+    /// Called when a job ends, on activation and every minute while waiting.
+    func upgradeIfPending() {
+        guard upgrade == .pending else { return }
+        Task { await upgradeWhenIdle() }
+    }
+
+    /// Upgrade unless something still runs from the environment. That includes a
+    /// job an earlier app session left running, which the app never launched.
+    private func upgradeWhenIdle() async {
+        guard cli.isInstalled, cli.needsUpgrade, !isInstalling else { return }
+        if await environmentInUse() {
+            setUpgrade(.pending)
+            return
+        }
+        await install()
+    }
+
+    private func environmentInUse() async -> Bool {
+        let ps = await CommandRunner.run(
+            executable: URL(fileURLWithPath: "/bin/ps"), args: ["-axww", "-o", "args="], cwd: nil
+        )
+        // If ps cannot run, nothing is known to be safe: wait.
+        guard ps.ok else { return true }
+        return VenvProcesses.anyUsing(script: cli.scriptPath, psOutput: ps.stdout)
+    }
+
+    private func setUpgrade(_ state: Upgrade) {
+        upgrade = state
+        pendingCheck?.invalidate()
+        pendingCheck = nil
+        if state == .pending {
+            pendingCheck = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.upgradeIfPending() }
+            }
+        }
     }
 
     func reloadConfig(seedQuickBar seed: Bool = false) async {

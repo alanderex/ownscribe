@@ -101,6 +101,10 @@ final class OwnscribeCLI {
 
     /// The ownscribe console script in the managed venv, if installed. Running it directly
     /// (not via a shell) lets us deliver SIGINT to the real Python process for a clean Stop.
+    /// The venv's console script, whether or not it is installed yet. Processes
+    /// with this path in their command line run from this environment.
+    var scriptPath: String { venvDir.appendingPathComponent("bin/ownscribe").path }
+
     var cliURL: URL? {
         let candidate = venvDir.appendingPathComponent("bin/ownscribe")
         return FileManager.default.isExecutableFile(atPath: candidate.path) ? candidate : nil

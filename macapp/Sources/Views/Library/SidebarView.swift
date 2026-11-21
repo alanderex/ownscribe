@@ -17,6 +17,11 @@ struct SidebarView: View {
                 }
             }
             Section("Library") {
+                if let failure = library.listFailure {
+                    Label(failure, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if sections.isEmpty && !query.isEmpty {
                     Text("No titles or summaries match “\(query)”.")
                         .foregroundStyle(.secondary)
@@ -38,6 +43,10 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .safeAreaInset(edge: .top) {
+            DegradedBanner()
+                .padding(.horizontal, 10)
+        }
         .alert("Couldn't move to Trash", isPresented: Binding(
             get: { trashFailure != nil }, set: { if !$0 { trashFailure = nil } }
         )) {

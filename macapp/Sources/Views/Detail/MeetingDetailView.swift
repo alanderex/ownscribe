@@ -54,10 +54,23 @@ struct MeetingDetailView: View {
     }
 
     private var tab: Tab {
-        chosenTab ?? (summary == nil && row.status.hasTranscript && loadedPath == row.path ? .transcript : .summary)
+        // An older CLI has no `show`, so there is no transcript view to switch to.
+        if engine.isDegraded { return .summary }
+        return chosenTab ?? (summary == nil && row.status.hasTranscript && loadedPath == row.path ? .transcript : .summary)
     }
 
+    @ViewBuilder
     private var tabBar: some View {
+        if engine.isDegraded {
+            Text("The transcript view returns after the update.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        } else {
+            tabPicker
+        }
+    }
+
+    private var tabPicker: some View {
         HStack {
             Picker("Show", selection: Binding(get: { tab }, set: { chosenTab = $0 })) {
                 ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
@@ -140,12 +153,17 @@ struct MeetingDetailView: View {
     private func load() async {
         let folder = row.url
         async let summaryText = Task.detached { SummaryFile.text(inFolder: folder) }.value
-        do {
-            document = try await engine.cli.show(folder)
-            documentFailure = nil
-        } catch {
+        if engine.isDegraded {
             document = nil
-            documentFailure = Self.describe(error)
+            documentFailure = nil
+        } else {
+            do {
+                document = try await engine.cli.show(folder)
+                documentFailure = nil
+            } catch {
+                document = nil
+                documentFailure = Self.describe(error)
+            }
         }
         summary = await summaryText
         loadedPath = row.path
