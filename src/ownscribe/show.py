@@ -39,6 +39,12 @@ _LONG_DAY_RE = re.compile(r"^(?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2})(?:[-_]|$)")
 
 _DIGITS = frozenset("0123456789")
 
+# A word for capitalization: a run of letters. Foundation's `capitalized` keeps a
+# word whole across these marks (apostrophes and accents, measured, not guessed)
+# and starts a new word after any other non-letter.
+_WORD_JOINERS = "'^`\u2019\u02bc\u00b4"
+_WORD_RE = re.compile(rf"[^\W\d_]+(?:[{re.escape(_WORD_JOINERS)}][^\W\d_]+)*")
+
 
 @dataclass
 class Turn:
@@ -253,13 +259,14 @@ def _status(config: Config, directory: Path) -> dict:
 
 
 def _capitalize_words(text: str) -> str:
-    """Upper-case each space-separated word's first letter, lower-case the rest.
+    """Upper-case the first letter of each word and lower-case the rest.
 
-    Matches Foundation's `String.capitalized`, which the app uses: words are split
-    on whitespace only, so `q2` stays `Q2` and `ai@strategy` becomes `Ai@strategy`
-    (str.title() would give `Ai@Strategy`, and `2Nd` for `2nd`).
+    Matches Foundation's `String.capitalized`, which the app uses: any non-letter
+    starts a new word (`ai@strategy` -> `Ai@Strategy`, `time4work` -> `Time4Work`)
+    except the apostrophes and accent marks in _WORD_JOINERS (`o'neil` -> `O'neil`,
+    where str.title() gives `O'Neil`).
     """
-    return " ".join(word[:1].upper() + word[1:].lower() for word in text.split(" "))
+    return _WORD_RE.sub(lambda m: m[0][:1].upper() + m[0][1:].lower(), text)
 
 
 def _all_digits(text: str) -> bool:
