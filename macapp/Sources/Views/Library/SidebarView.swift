@@ -5,6 +5,7 @@ struct SidebarView: View {
     @Environment(Recorder.self) private var recorder
     @Environment(Jobs.self) private var jobs
     @Binding var selection: SidebarItem?
+    @State private var trashFailure: String?
 
     var body: some View {
         List(selection: $selection) {
@@ -23,11 +24,35 @@ struct SidebarView: View {
                     ForEach(section.rows) { row in
                         LibraryRowView(row: row, time: library.calendar.time(of: row))
                             .tag(SidebarItem.meeting(row.path))
+                            .contextMenu { menu(for: row) }
                     }
                 }
             }
         }
         .listStyle(.sidebar)
+        .alert("Couldn't move to Trash", isPresented: Binding(
+            get: { trashFailure != nil }, set: { if !$0 { trashFailure = nil } }
+        )) {
+            Button("OK") { trashFailure = nil }
+        } message: {
+            Text(trashFailure ?? "")
+        }
+    }
+
+    @ViewBuilder
+    private func menu(for row: LibraryRow) -> some View {
+        Button("Reveal in Finder") { library.revealInFinder(row) }
+        Button("Copy Summary") { library.copySummary(of: row) }
+            .disabled(!row.status.hasSummary)
+        Divider()
+        Button("Move to Trash") {
+            do {
+                try library.moveToTrash(row)
+                if selection == .meeting(row.path) { selection = nil }
+            } catch {
+                trashFailure = error.localizedDescription
+            }
+        }
     }
 
     private var hasActiveRun: Bool {

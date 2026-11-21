@@ -134,6 +134,28 @@ final class Library {
         NSWorkspace.shared.activateFileViewerSelecting([meeting.url])
     }
 
+    func revealInFinder(_ row: LibraryRow) {
+        NSWorkspace.shared.activateFileViewerSelecting([row.url])
+    }
+
+    /// Copies the summary's text (summary.json's value, not its JSON).
+    func copySummary(of row: LibraryRow) {
+        let folder = row.url
+        Task {
+            guard let text = await Task.detached(operation: { SummaryFile.text(inFolder: folder) }).value else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
+    }
+
+    /// Moves the meeting folder to the Trash, where it can still be put back. A
+    /// recording kept in a separate output.audio_dir stays where it is.
+    func moveToTrash(_ row: LibraryRow) throws {
+        try FileManager.default.trashItem(at: row.url, resultingItemURL: nil)
+        rows.removeAll { $0.path == row.path }
+        refresh()
+    }
+
     func copySummary() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(summaryText, forType: .string)
