@@ -761,14 +761,26 @@ _VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov", ".mkv"}
 _MEDIA_EXTENSIONS = _AUDIO_EXTENSIONS | _VIDEO_EXTENSIONS
 
 
+# The audio helper records system and mic to `<name>.sys.tmp.wav` / `<name>.mic.tmp.wav`
+# and merges them into `<name>` when it stops. After a crash only the unmerged tracks
+# remain, and each holds half the meeting.
+_UNMERGED_TRACK_SUFFIX = ".tmp.wav"
+
+
 def _find_audio(directory: Path) -> Path | None:
-    """Find an audio or video file in directory, preferring 'recording.wav'."""
+    """Find an audio or video file in directory, preferring 'recording.wav'.
+
+    Unmerged capture tracks are never returned: transcribing one gives a transcript
+    of only the mic (or only the system audio) that looks complete.
+    """
     recording = directory / "recording.wav"
     if recording.exists():
         return recording
     # sorted(): iterdir() is filesystem order, so a folder holding two media files
     # would resume a different one on different machines.
     for f in sorted(directory.iterdir()):
+        if f.name.lower().endswith(_UNMERGED_TRACK_SUFFIX):
+            continue
         if f.is_file() and f.suffix.lower() in _MEDIA_EXTENSIONS:
             return f
     return None

@@ -34,3 +34,23 @@ class TestFindAudioVideo:
     def test_ignores_unrelated_files(self, tmp_path):
         _touch(tmp_path, "notes.txt", "slides.pdf")
         assert _find_audio(tmp_path) is None
+
+
+class TestFindAudioSkipsUnmergedTracks:
+    """A crash mid-recording leaves the helper's per-source tracks unmerged."""
+
+    def test_crash_leftovers_are_not_a_recording(self, tmp_path):
+        _touch(tmp_path, "recording.wav.mic.tmp.wav", "recording.wav.sys.tmp.wav")
+        assert _find_audio(tmp_path) is None
+
+    def test_real_media_next_to_leftovers_is_found(self, tmp_path):
+        _touch(tmp_path, "recording.wav.mic.tmp.wav", "recording.wav.sys.tmp.wav", "call.m4a")
+        assert _find_audio(tmp_path) == tmp_path / "call.m4a"
+
+    def test_merged_recording_still_wins(self, tmp_path):
+        _touch(tmp_path, "recording.wav.mic.tmp.wav", "recording.wav")
+        assert _find_audio(tmp_path) == tmp_path / "recording.wav"
+
+    def test_suffix_check_ignores_case(self, tmp_path):
+        _touch(tmp_path, "Recording.WAV.MIC.TMP.WAV")
+        assert _find_audio(tmp_path) is None
