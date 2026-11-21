@@ -197,7 +197,6 @@ final class Jobs {
         state = .idle
         library.markUnseen(meeting.url.path)
         lastFinished = FinishedRun(run: token, folder: meeting.url.path)
-        library.show(meeting)
         library.refresh()
     }
 }

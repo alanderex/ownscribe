@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Root of the menu-bar popover. Shows the most pressing state: setup, a failure,
-/// a running recording or job, an open meeting, or the idle recorder.
+/// Root of the menu-bar popover: the recorder. Shows the most pressing state:
+/// setup, a failure, a running recording or job, or the idle recorder. Meetings
+/// open in the window.
 struct MenuContentView: View {
     @Environment(Engine.self) private var engine
     @Environment(Recorder.self) private var recorder
@@ -66,8 +67,6 @@ struct MenuContentView: View {
             StatusView()
         } else if case .failed(let message) = jobs.state {
             FailedView(message: message, permission: nil)
-        } else if library.currentMeeting != nil {
-            SummaryView()
         } else {
             IdleView()
         }
@@ -101,14 +100,24 @@ struct MenuContentView: View {
     }
 }
 
-/// Idle: quick-bar + record button + recent meetings.
+/// Idle: a finished meeting waiting to be opened, Record, the options for the next
+/// recording (collapsed), and the latest meetings.
 private struct IdleView: View {
     @Environment(Recorder.self) private var recorder
+    @Environment(Jobs.self) private var jobs
     @Environment(Library.self) private var library
+    @Environment(WindowCoordinator.self) private var windows
+    @Environment(\.openWindow) private var openWindow
+    @AppStorage("popover.optionsExpanded") private var optionsExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            QuickBarView()
+            if let ready = readyFolder {
+                ReadyBanner(path: ready, title: title(of: ready)) {
+                    library.markSeen(ready)
+                    windows.open(meeting: ready, with: openWindow)
+                }
+            }
 
             Button(action: recorder.start) {
                 Label("Start Recording", systemImage: "record.circle")
@@ -118,10 +127,56 @@ private struct IdleView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
 
-            if !library.recentMeetings.isEmpty {
-                RecentView()
+            DisclosureGroup("Options", isExpanded: $optionsExpanded) {
+                QuickBarView()
+                    .padding(.top, 8)
+            }
+
+            let recent = library.recentRows(5)
+            if !recent.isEmpty {
+                RecentView(rows: recent)
             }
         }
+    }
+
+    /// The meeting the last run produced, until it is opened.
+    private var readyFolder: String? {
+        guard let folder = jobs.lastFinished?.folder, library.unseen.contains(folder) else { return nil }
+        return folder
+    }
+
+    private func title(of path: String) -> String {
+        library.rows.first { $0.path == path }?.title
+            ?? FolderName.title(URL(fileURLWithPath: path).lastPathComponent)
+    }
+}
+
+/// "Ready · Open": a run finished while the user was elsewhere. Nothing takes
+/// focus by itself; this, the row badge and the icon's dot say so instead.
+private struct ReadyBanner: View {
+    let path: String
+    let title: String
+    let open: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Ready").font(.caption).foregroundStyle(.secondary)
+                Text(title).font(.callout).lineLimit(1)
+            }
+            Spacer()
+            Button("Open", action: open)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Ready: \(title)")
+        .accessibilityAction(named: "Open", open)
     }
 }
 

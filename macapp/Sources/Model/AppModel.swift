@@ -13,7 +13,7 @@ final class AppModel {
         engine = Engine()
         library = Library(engine: engine)
         jobs = Jobs(engine: engine, library: library)
-        recorder = Recorder(engine: engine, jobs: jobs, library: library)
+        recorder = Recorder(engine: engine, jobs: jobs)
         windows = WindowCoordinator()
         engine.onConfigLoaded = { [weak library] in library?.refresh() }
         // Here and not in the popover's .task: MenuBarExtra builds its content only

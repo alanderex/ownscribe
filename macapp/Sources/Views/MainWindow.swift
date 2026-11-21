@@ -11,6 +11,7 @@ enum SidebarItem: Hashable {
 struct MainWindow: View {
     @Environment(Library.self) private var library
     @Environment(Jobs.self) private var jobs
+    @Environment(WindowCoordinator.self) private var windows
     @State private var selection: SidebarItem?
     @State private var query = ""
     @FocusState private var searchFocused: Bool
@@ -45,6 +46,11 @@ struct MainWindow: View {
             case nil, .activeRun?: selection = .meeting(finished.folder)
             default: break
             }
+        }
+        .onChange(of: windows.requestedMeeting, initial: true) { _, path in
+            guard let path else { return }
+            selection = .meeting(path)
+            windows.requestedMeeting = nil
         }
         .onChange(of: selection) { _, selected in
             if case .meeting(let path)? = selected { library.markSeen(path) }

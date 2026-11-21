@@ -33,7 +33,7 @@ struct StatusView: View {
                 .foregroundStyle(.secondary)
 
             Button(action: recorder.stop) {
-                Label("Stop & Transcribe", systemImage: "stop.circle")
+                Label("Stop Recording", systemImage: "stop.circle")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
             }

@@ -79,7 +79,7 @@ struct MenuBarScene: Scene {
             MenuContentView()
                 .modelEnvironment(model)
         } label: {
-            MenuBarIcon(engine: model.engine, recorder: model.recorder, jobs: model.jobs)
+            MenuBarIcon(engine: model.engine, recorder: model.recorder, jobs: model.jobs, library: model.library)
         }
         .menuBarExtraStyle(.window)
     }

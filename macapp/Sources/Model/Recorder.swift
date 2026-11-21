@@ -22,14 +22,12 @@ final class Recorder {
 
     private let engine: Engine
     private let jobs: Jobs
-    private let library: Library
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var startDate: Date?
 
-    init(engine: Engine, jobs: Jobs, library: Library) {
+    init(engine: Engine, jobs: Jobs) {
         self.engine = engine
         self.jobs = jobs
-        self.library = library
         jobs.onCaptureEnded = { [weak self] in self?.captureEnded() }
     }
 
@@ -59,7 +57,6 @@ final class Recorder {
 
     private func begin() {
         let flags = engine.takeRecordingFlags()
-        library.closeMeeting()
         phase = .recording
         elapsed = 0
         startDate = Date()

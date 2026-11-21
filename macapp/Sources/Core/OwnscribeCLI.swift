@@ -216,15 +216,6 @@ final class OwnscribeCLI {
         return try await Task.detached { try MeetingDocument.decode(data) }.value
     }
 
-    func listSpeakers(_ transcript: URL) async -> [String] {
-        let result = await run(["list-speakers", transcript.path])
-        guard result.ok,
-              let data = result.stdout.data(using: .utf8),
-              let labels = try? JSONDecoder().decode([String].self, from: data)
-        else { return [] }
-        return labels
-    }
-
     @discardableResult
     func renameSpeakers(_ transcript: URL, mapping: [String: String]) async -> CommandResult {
         var args = ["rename-speakers", transcript.path]

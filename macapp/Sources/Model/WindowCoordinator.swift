@@ -25,6 +25,15 @@ final class WindowCoordinator {
         }
     }
 
+    /// A meeting the menu asked the main window to select; the window takes it.
+    var requestedMeeting: String?
+
+    /// Open the main window on one meeting.
+    func open(meeting path: String, with openWindow: OpenWindowAction) {
+        requestedMeeting = path
+        open(WindowID.main, with: openWindow)
+    }
+
     func open(_ id: String, with openWindow: OpenWindowAction) {
         Task {
             NSApp.setActivationPolicy(.regular)
