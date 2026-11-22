@@ -206,7 +206,7 @@ missing Screen Recording grant for the app.
   progress (its steps, Cancel, or its error) and the library by day, from
   `ownscribe show --list --json`, refreshed on changes in the output folder. The
   detail pane shows a meeting's summary or transcript (from `ownscribe show DIR
-  --json`); clicking a turn plays the recording from there. The toolbar has Record
+  --json`); clicking a line plays the recording from there. The toolbar has Record
   (▾ for the options) and a search field for titles and summaries (⌘F).
 - **Options** (per-run): title, capture source, Whisper model, language, template,
   and — when diarization is enabled — speaker count. These are passed as CLI
@@ -216,8 +216,16 @@ missing Screen Recording grant for the app.
 - **Recording**: launches the full `ownscribe` pipeline; **Stop** sends `SIGINT`,
   which stops recording ("Finalizing…" while the tracks merge) and lets it
   continue to transcribe + summarize.
-- **Speaker naming**: a meeting with unnamed `SPEAKER_xx` labels shows a naming
-  form above its transcript; it renames via `ownscribe rename-speakers`.
+- **Speakers** (⌥⌘I, or the toolbar's Speakers button): an inspector beside the
+  meeting names its speakers, with names used in other meetings on offer, plays a
+  few seconds of each, and merges two with "Same person as…". In the transcript a
+  line's context menu moves the line, or its turn, to another or a new speaker.
+  Edits form one draft per meeting: ⌘↩ saves it, Esc discards it, leaving the
+  meeting saves it. Saving runs `ownscribe edit-speakers`, which changes the
+  transcript and the summary together; Restore Original Names puts back the files
+  from before the first edit. A summary written before lines were moved says so,
+  with Re-summarize. The inspector opens by itself for meetings with unnamed
+  speakers, and is read-only while a job works on the meeting.
 - **Upgrades**: a new app bundle upgrades the CLI at launch, but never while a
   process runs from its environment. Until the upgrade lands (or if it fails),
   the app keeps recording on the old CLI and says so.
@@ -234,14 +242,16 @@ macapp/
   Package.swift               SwiftPM package for Sources/Logic and its tests only
   Sources/
     OwnscribeApp.swift        @main: picks the App type; menu bar, window, Settings
-    Model/                    Engine, Recorder, Jobs, Library (@Observable),
-                              AppModel, WindowCoordinator, TurnPlayer
+    Model/                    Engine, Recorder, Jobs, Library, SpeakerEditor
+                              (@Observable), AppModel, WindowCoordinator, TurnPlayer
     Logic/                    Foundation-only logic, unit-tested: events, library
-                              rows, folder names, playback formats, …
+                              rows, folder names, playback formats, speaker
+                              drafts, …
     Core/                     CommandRunner, OwnscribeCLI, ConfigModel,
                               Meeting, Permissions, DirectoryWatcher
     Views/                    menu content, window, Library/ (sidebar),
-                              Detail/ (summary, transcript), Settings
+                              Detail/ (summary, transcript), Inspector/
+                              (speakers), Settings
   Tests/LogicTests/           XCTest for Sources/Logic
 ```
 
