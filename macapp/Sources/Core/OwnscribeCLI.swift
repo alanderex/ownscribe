@@ -234,6 +234,11 @@ final class OwnscribeCLI {
         await run(["edit-speakers", folder.path] + arguments)
     }
 
+    /// Removes a tag from every meeting (`ownscribe tags --delete`).
+    func deleteTag(_ name: String) async -> CommandResult {
+        await run(["tags", "--delete", name])
+    }
+
     /// Adds and removes a meeting's tags (`ownscribe tag`).
     func tag(_ folder: URL, add: [String], remove: [String]) async -> CommandResult {
         await run(["tag", folder.path] + add.flatMap { ["--add", $0] } + remove.flatMap { ["--remove", $0] })

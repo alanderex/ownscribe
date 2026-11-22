@@ -150,6 +150,18 @@ final class Library {
         return nil
     }
 
+    /// Removes a tag from every meeting with `ownscribe tags --delete`, then lists the
+    /// library again, also after a refusal, which may come after some meetings lost
+    /// the tag. Returns why it failed (for busy meetings, which ones), or nil.
+    func deleteTag(_ tag: LibraryTag) async -> String? {
+        let result = await engine.cli.deleteTag(tag.name)
+        refresh()
+        guard result.ok else {
+            return FailureText.wholeMessage(result.stderr) ?? "Deleting the tag failed (exit \(result.exitCode))."
+        }
+        return nil
+    }
+
     /// Names given to speakers anywhere in the library, offered when naming speakers.
     var knownSpeakerNames: [String] { LibraryRow.speakerNames(in: rows) }
 

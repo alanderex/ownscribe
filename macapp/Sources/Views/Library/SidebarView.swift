@@ -6,7 +6,10 @@ struct SidebarView: View {
     @Environment(Jobs.self) private var jobs
     @Binding var selection: SidebarItem?
     let query: String
-    @State private var trashFailure: String?
+    /// A failed Move to Trash or Delete Tag, until dismissed.
+    @State private var failure: (title: String, message: String)?
+    /// The tag waiting for the user to confirm its deletion.
+    @State private var tagToDelete: LibraryTag?
     /// The tags the Library is filtered by, one per line (see LibraryTagFilter).
     @SceneStorage("libraryTagFilter") private var storedTagFilter = ""
     @AppStorage("sidebar.tagsExpanded") private var tagsExpanded = true
@@ -26,6 +29,9 @@ struct SidebarView: View {
                         // which meeting is open.
                         TagFilterRow(tag: tag, isSelected: activeTags.contains(tag.name)) {
                             toggle(tag.name)
+                        }
+                        .contextMenu {
+                            Button("Delete Tag…", role: .destructive) { tagToDelete = tag }
                         }
                     }
                 } header: {
@@ -78,12 +84,22 @@ struct SidebarView: View {
             DegradedBanner()
                 .padding(.horizontal, 10)
         }
-        .alert("Couldn't move to Trash", isPresented: Binding(
-            get: { trashFailure != nil }, set: { if !$0 { trashFailure = nil } }
+        .confirmationDialog(
+            deletionQuestion, isPresented: Binding(
+                get: { tagToDelete != nil }, set: { if !$0 { tagToDelete = nil } }
+            ), titleVisibility: .visible, presenting: tagToDelete
+        ) { tag in
+            Button("Delete Tag", role: .destructive) { delete(tag) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Only the tag is removed; the meetings stay as they are.")
+        }
+        .alert(failure?.title ?? "", isPresented: Binding(
+            get: { failure != nil }, set: { if !$0 { failure = nil } }
         )) {
-            Button("OK") { trashFailure = nil }
+            Button("OK") { failure = nil }
         } message: {
-            Text(trashFailure ?? "")
+            Text(failure?.message ?? "")
         }
     }
 
@@ -98,7 +114,7 @@ struct SidebarView: View {
                 try library.moveToTrash(row)
                 if selection == .meeting(row.path) { selection = nil }
             } catch {
-                trashFailure = error.localizedDescription
+                failure = ("Couldn't move to Trash", error.localizedDescription)
             }
         }
     }
@@ -121,6 +137,19 @@ struct SidebarView: View {
     /// meetings behind a tag that is gone, with no Tags section left to clear it.
     private var activeTags: Set<String> {
         selectedTags.intersection(library.tags.map(\.name))
+    }
+
+    private var deletionQuestion: String {
+        guard let tag = tagToDelete else { return "" }
+        return "Remove “\(tag.name)” from \(tag.count == 1 ? "1 meeting" : "\(tag.count) meetings")?"
+    }
+
+    private func delete(_ tag: LibraryTag) {
+        Task {
+            if let problem = await library.deleteTag(tag) {
+                failure = ("Couldn't delete “\(tag.name)”", problem)
+            }
+        }
     }
 
     private func toggle(_ tag: String) {

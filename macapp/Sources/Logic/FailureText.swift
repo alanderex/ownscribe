@@ -25,6 +25,17 @@ enum FailureText {
         return lines.first(where: { !isLibraryNoise($0) }) ?? lines.first
     }
 
+    /// The whole message of a CLI error that spans several lines (a list of busy
+    /// folders, say), without click's "Error: " prefix; nil when stderr is empty.
+    static func wholeMessage(_ text: String) -> String? {
+        let message = text.components(separatedBy: "\n")
+            .filter { !isProgressEventLine($0.trimmingCharacters(in: .whitespaces)) }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty else { return nil }
+        return message.hasPrefix("Error: ") ? String(message.dropFirst("Error: ".count)) : message
+    }
+
     private static func isLibraryNoise(_ line: String) -> Bool {
         let noise = [
             "Warning:", "warnings.warn", "FutureWarning", "UserWarning",
