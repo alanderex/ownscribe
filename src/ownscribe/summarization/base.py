@@ -58,6 +58,10 @@ def _group_by_budget(items: list[str], budget: int, count_tokens: TokenCounter) 
     return groups
 
 
+class SummarizerUnavailable(Exception):
+    """The backend cannot be used now; the message says why, for the user."""
+
+
 class Summarizer(abc.ABC):
     """Base class for summarization backends.
 

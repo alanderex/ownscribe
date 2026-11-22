@@ -200,6 +200,7 @@ ownscribe resume ./260220-1736 --resummarize  # write the summary again (e.g. af
 ownscribe ask "question"           # search your meetings with a natural-language question
 ownscribe show ./260220-1736 --json # describe a meeting folder as JSON: turns, speakers, status
 ownscribe show --list --json        # list every meeting folder as JSON: day, title, duration, tags, status
+ownscribe models --json             # list the models the omlx or openai summarization server offers
 ownscribe list-speakers transcript.md                       # list diarized speaker labels (JSON)
 ownscribe rename-speakers transcript.md --map SPEAKER_00=Anna # name speakers in a transcript
 ownscribe edit-speakers ./260220-1736 --map SPEAKER_00=Anna  # rename or merge speakers in transcript + summary
@@ -327,7 +328,7 @@ summarize with a model it serves, set in `[summarization]`:
 
 ```toml
 backend = "omlx"
-model = "..."             # a model name oMLX serves
+model = "..."             # a model name oMLX serves: `ownscribe models --json` lists them
 api_key = "..."           # oMLX's API key (or set OPENAI_API_KEY)
 ```
 

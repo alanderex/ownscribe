@@ -84,6 +84,94 @@ class TestOMLXBackend:
         assert _request_body(httpserver, "/v1/chat/completions")["model"] == "m"
 
 
+def _models_page(*ids: str) -> dict:
+    return {"object": "list", "data": [{"id": i, "object": "model", "owned_by": "omlx"} for i in ids]}
+
+
+class TestServedModels:
+    def test_lists_the_ids_sorted_by_name(self, httpserver):
+        httpserver.expect_request("/v1/models", method="GET").respond_with_json(_models_page("b-model", "A-model", "c"))
+        config = SummarizationConfig(host=httpserver.url_for(""), backend="omlx", model="c")
+
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        assert OpenAISummarizer(config).served_models() == ["A-model", "b-model", "c"]
+
+    def test_omlx_must_serve_the_configured_model(self, httpserver):
+        httpserver.expect_request("/v1/models", method="GET").respond_with_json(_models_page("gemma", "qwen"))
+        config = SummarizationConfig(host=httpserver.url_for(""), backend="omlx", model="llama")
+
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        assert OpenAISummarizer(config).problem() == (
+            "oMLX does not serve the model 'llama' (summarization.model). "
+            "`ownscribe models --json` lists the 2 it serves."
+        )
+
+    def test_other_servers_are_not_held_to_their_list(self, httpserver):
+        # LM Studio and others may list only loaded models and load others on demand.
+        httpserver.expect_request("/v1/models", method="GET").respond_with_json(_models_page("gemma"))
+        config = SummarizationConfig(host=httpserver.url_for(""), backend="openai", model="llama")
+
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        assert OpenAISummarizer(config).problem() is None
+
+
+class TestModelsCommand:
+    @staticmethod
+    def _run(config: Config, *args: str):
+        from click.testing import CliRunner
+
+        from ownscribe.cli import cli
+
+        with patch("ownscribe.cli.Config.load", return_value=config):
+            return CliRunner().invoke(cli, ["models", *args])
+
+    @staticmethod
+    def _config(backend: str, host: str = "", api_key: str = "") -> Config:
+        config = Config()
+        config.summarization.backend = backend
+        config.summarization.host = host
+        config.summarization.api_key = api_key
+        return config
+
+    def test_prints_the_served_models(self, httpserver):
+        import json
+
+        httpserver.expect_request("/v1/models", method="GET", headers={"Authorization": "Bearer k"}).respond_with_json(
+            _models_page("qwen", "Gemma")
+        )
+        result = self._run(self._config("omlx", httpserver.url_for(""), "k"), "--json")
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output) == {
+            "schema": 1,
+            "backend": "omlx",
+            "host": httpserver.url_for("").rstrip("/") + "/v1",
+            "models": ["Gemma", "qwen"],
+        }
+
+    def test_a_refused_key_says_so(self, httpserver):
+        httpserver.expect_request("/v1/models", method="GET").respond_with_json({"error": "no"}, status=401)
+        result = self._run(self._config("omlx", httpserver.url_for("")), "--json")
+        assert result.exit_code == 1
+        assert "oMLX refused the API key" in result.output
+
+    def test_a_server_that_is_not_running_says_so(self):
+        result = self._run(self._config("omlx", "http://localhost:1"), "--json")
+        assert result.exit_code == 1
+        assert "oMLX is not reachable at http://localhost:1/v1. Is it running?" in result.output
+
+    @pytest.mark.parametrize("backend", ["local", "ollama"])
+    def test_other_backends_are_a_usage_error(self, backend):
+        result = self._run(self._config(backend), "--json")
+        assert result.exit_code == 2
+        assert "omlx or openai server" in result.output
+
+    def test_json_is_required(self):
+        assert self._run(self._config("omlx")).exit_code == 2
+
+
 class TestCleanResponse:
     def test_strips_think_tags(self):
         raw = "<think>reasoning about the meeting</think>\n## Summary\nclean"

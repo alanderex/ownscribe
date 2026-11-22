@@ -383,6 +383,40 @@ def show(ctx: click.Context, directory: str | None, list_all: bool, as_json: boo
     click.echo(json.dumps(payload, ensure_ascii=False))
 
 
+@cli.command("models")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON (the only output format).")
+@click.pass_context
+def models_cmd(ctx: click.Context, as_json: bool) -> None:
+    """List the models the configured omlx or openai summarization server offers."""
+    import json
+
+    from ownscribe.summarization import create_summarizer
+    from ownscribe.summarization.base import SummarizerUnavailable
+
+    if not as_json:
+        raise click.UsageError("models prints JSON only; pass --json.")
+    config = ctx.obj["config"]
+    backend = config.summarization.backend
+    if backend not in ("omlx", "openai"):
+        raise click.UsageError(
+            f"models lists the models of an omlx or openai server; summarization.backend is {backend!r}."
+        )
+    try:
+        summarizer = create_summarizer(config)
+    except ImportError as exc:
+        raise click.ClickException(str(exc)) from None
+    from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+    if not isinstance(summarizer, OpenAISummarizer):
+        raise click.ClickException(f"The {backend} backend is not an OpenAI-compatible server.")
+    try:
+        served = summarizer.served_models()
+    except SummarizerUnavailable as exc:
+        raise click.ClickException(str(exc)) from None
+    payload = {"schema": 1, "backend": backend, "host": summarizer.base_url, "models": served}
+    click.echo(json.dumps(payload, ensure_ascii=False))
+
+
 @cli.command("list-speakers")
 @click.argument("transcript", type=click.Path(exists=True, dir_okay=False))
 def list_speakers_cmd(transcript: str) -> None:
