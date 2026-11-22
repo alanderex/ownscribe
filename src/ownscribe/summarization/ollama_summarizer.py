@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import ollama
 
 from ownscribe.config import SummarizationConfig
@@ -49,7 +51,7 @@ class OllamaSummarizer(Summarizer):
         json_mode: bool = False,
         json_schema: dict | None = None,
     ) -> str:
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         if json_mode:
             kwargs["format"] = "json"
         response = self._client.chat(

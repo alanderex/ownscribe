@@ -205,6 +205,13 @@ class TestProgressEvents:
         started = [e for e in self._events(capsys) if e["event"] == "recording_started"]
         assert started and started[0]["silence_timeout"] == 90
 
+    def test_started_names_the_meeting_folder(self, run, capsys, monkeypatch):
+        monkeypatch.setenv("OWNSCRIBE_PROGRESS_EVENTS", "1")
+        _, stage, _ = run(title="Q2 Sales Review")
+
+        started = [e for e in self._events(capsys) if e["event"] == "recording_started"]
+        assert started and started[0]["folder"] == str(stage.call_args[0][2])
+
     def test_nothing_is_emitted_by_default(self, run, capsys, monkeypatch):
         monkeypatch.delenv("OWNSCRIBE_PROGRESS_EVENTS", raising=False)
         run()

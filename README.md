@@ -86,9 +86,11 @@ Works with any app that outputs audio through Core Audio (Zoom, Teams, Meet, etc
 
 ## Menu-bar app (macOS)
 
-A native SwiftUI menu-bar app lives in [`macapp/`](macapp/README.md). It drives
-this CLI as a subprocess — config, recordings and output are shared — and renders
-live pipeline progress. See `macapp/README.md` for building it.
+A native SwiftUI app lives in [`macapp/`](macapp/README.md): a recorder in the
+menu bar and a window with your meetings, their summaries and transcripts, and
+playback from any transcript turn. It drives this CLI as a subprocess — config,
+recordings and output are shared — and renders live pipeline progress. See
+`macapp/README.md` for building it.
 
 ## Installation
 
@@ -194,6 +196,8 @@ ownscribe transcribe recording.wav # transcribe an audio or video file: wav/mp3/
 ownscribe summarize transcript.md  # summarize a transcript (saves alongside the input)
 ownscribe resume ./260220-1736    # resume a partial run, or process a folder's audio/video recording
 ownscribe ask "question"           # search your meetings with a natural-language question
+ownscribe show ./260220-1736 --json # describe a meeting folder as JSON: turns, speakers, status
+ownscribe show --list --json        # list every meeting folder as JSON: day, title, duration, status
 ownscribe list-speakers transcript.md                       # list diarized speaker labels (JSON)
 ownscribe rename-speakers transcript.md --map SPEAKER_00=Anna # name speakers in a transcript
 ownscribe config                   # open config file in $EDITOR

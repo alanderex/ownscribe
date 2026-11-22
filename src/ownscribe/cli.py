@@ -351,6 +351,32 @@ def _parse_speaker_map(pairs: tuple[str, ...]) -> dict[str, str]:
     return mapping
 
 
+@cli.command()
+@click.argument("directory", required=False, type=click.Path(exists=True, file_okay=False))
+@click.option("--list", "list_all", is_flag=True, help="List every meeting folder in the output directory.")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON (the only output format).")
+@click.pass_context
+def show(ctx: click.Context, directory: str | None, list_all: bool, as_json: bool) -> None:
+    """Describe a meeting folder, or list all of them with --list, as JSON."""
+    import json
+    from pathlib import Path
+
+    from ownscribe.show import meeting_detail, meeting_rows
+
+    if not as_json:
+        raise click.UsageError("show prints JSON only; pass --json.")
+    config = ctx.obj["config"]
+    if list_all:
+        if directory is not None:
+            raise click.UsageError("Pass a meeting DIRECTORY or --list, not both.")
+        payload = meeting_rows(config)
+    elif directory is None:
+        raise click.UsageError("Missing argument 'DIRECTORY' (or pass --list).")
+    else:
+        payload = meeting_detail(config, Path(directory).resolve())
+    click.echo(json.dumps(payload, ensure_ascii=False))
+
+
 @cli.command("list-speakers")
 @click.argument("transcript", type=click.Path(exists=True, dir_okay=False))
 def list_speakers_cmd(transcript: str) -> None:

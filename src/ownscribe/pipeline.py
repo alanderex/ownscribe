@@ -364,7 +364,9 @@ def run_pipeline(config: Config, title: str | None = None) -> None:
 
     recorder.start(audio_path)
     start_time = time.time()
-    emit_event("recording_started", silence_timeout=config.audio.silence_timeout)
+    # `folder` is the meeting folder this run owns. A GUI keeps it out of its library
+    # until meeting_saved names where it ended up (a summary title renames it).
+    emit_event("recording_started", silence_timeout=config.audio.silence_timeout, folder=str(out_dir))
 
     old_termios = None
     if can_mute and is_tty:
@@ -622,6 +624,7 @@ def run_summarize(config: Config, transcript_file: str) -> None:
 
     click.echo(f"\n{summary_md}")
     click.echo(f"Summary saved to {summary_path}")
+    _emit_meeting_saved(out_dir, "ok")
 
 
 def _do_transcribe_and_summarize(
@@ -754,6 +757,26 @@ def _do_transcribe_and_summarize(
             audio_path.parent.rmdir()
         click.echo(f"Recording deleted (keep_recording=false): {audio_path}")
 
+    if not sum_enabled:
+        summary_state = "disabled"
+    elif sum_unavailable:
+        summary_state = "unavailable"
+    elif sum_failed:
+        summary_state = "failed"
+    else:
+        summary_state = "ok"
+    _emit_meeting_saved(out_dir, summary_state)
+
+
+def _emit_meeting_saved(folder: Path, summary: str) -> None:
+    """The last event of every successful run.
+
+    `folder` is where the meeting ended up after any title rename; a GUI that
+    watched recording_started's folder maps it here. `summary` is ok, failed,
+    unavailable (backend not reachable) or disabled.
+    """
+    emit_event("meeting_saved", folder=str(folder), summary=summary)
+
 
 _AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".webm"}
 # Video containers whose audio track ffmpeg/WhisperX can decode (e.g. meeting recordings).
@@ -761,17 +784,44 @@ _VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov", ".mkv"}
 _MEDIA_EXTENSIONS = _AUDIO_EXTENSIONS | _VIDEO_EXTENSIONS
 
 
+# The audio helper records system and mic to `<name>.sys.tmp.wav` / `<name>.mic.tmp.wav`
+# and merges them into `<name>` when it stops. After a crash only the unmerged tracks
+# remain, and each holds half the meeting.
+_UNMERGED_TRACK_SUFFIX = ".tmp.wav"
+
+
 def _find_audio(directory: Path) -> Path | None:
-    """Find an audio or video file in directory, preferring 'recording.wav'."""
+    """Find an audio or video file in directory, preferring 'recording.wav'.
+
+    Unmerged capture tracks are never returned: transcribing one gives a transcript
+    of only the mic (or only the system audio) that looks complete.
+    """
     recording = directory / "recording.wav"
     if recording.exists():
         return recording
     # sorted(): iterdir() is filesystem order, so a folder holding two media files
     # would resume a different one on different machines.
     for f in sorted(directory.iterdir()):
+        if f.name.lower().endswith(_UNMERGED_TRACK_SUFFIX):
+            continue
         if f.is_file() and f.suffix.lower() in _MEDIA_EXTENSIONS:
             return f
     return None
+
+
+def find_meeting_audio(config: Config, directory: Path) -> Path | None:
+    """The recording that belongs to a meeting folder, or None.
+
+    The folder itself is searched first, since a user may have dropped a file into
+    it. With a separate `output.audio_dir`, the run's audio lives in a folder of the
+    same name there, so that is searched next.
+    """
+    audio = _find_audio(directory)
+    if audio is None and config.output.uses_separate_audio_dir:
+        candidate = config.output.resolved_audio_dir / directory.name
+        if candidate != directory and candidate.is_dir():
+            audio = _find_audio(candidate)
+    return audio
 
 
 def _find_transcript(directory: Path) -> Path | None:
@@ -799,19 +849,13 @@ def run_resume(config: Config, directory: str) -> None:
         click.echo(f"Error: {dir_path} is not a directory.", err=True)
         raise SystemExit(1)
 
-    # First look for an audio file in the target directory, since the user is
-    # explicitly resuming there. If none is found and a separate directory is
-    # configured for audio, search that directory as well.
-    audio = _find_audio(dir_path)
-    if audio is None and config.output.uses_separate_audio_dir:
-        candidate = config.output.resolved_audio_dir / dir_path.name
-        if candidate != dir_path and candidate.is_dir():
-            audio = _find_audio(candidate)
+    audio = find_meeting_audio(config, dir_path)
     transcript = _find_transcript(dir_path)
     summary = _find_summary(dir_path)
 
     if transcript and summary:
         click.echo("Nothing to resume — transcript and summary already exist.")
+        _emit_meeting_saved(dir_path, "ok")
         return
 
     if not audio and not transcript:

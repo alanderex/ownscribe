@@ -3,19 +3,20 @@ import SwiftUI
 /// Per-run controls. Seeded from config defaults; changes apply to the next
 /// recording only (passed as CLI flags), they do not rewrite config.toml.
 struct QuickBarView: View {
-    @EnvironmentObject var app: AppState
+    @Environment(Engine.self) private var engine
 
     var body: some View {
+        @Bindable var engine = engine
         VStack(alignment: .leading, spacing: 10) {
             row("Title") {
-                TextField("Optional", text: $app.meetingTitle)
+                TextField("Optional", text: $engine.meetingTitle)
                     .textFieldStyle(.roundedBorder)
                     .help("Names the output folder YYMMDD-your-title. "
                           + "Left blank, the summary supplies a title.")
             }
 
             row("Capture") {
-                Picker("", selection: $app.captureMic) {
+                Picker("", selection: $engine.captureMic) {
                     Text("System only").tag(false)
                     Text("System + Mic").tag(true)
                 }
@@ -24,15 +25,15 @@ struct QuickBarView: View {
             }
 
             row("Model") {
-                Picker("", selection: $app.model) {
-                    ForEach(app.modelOptions, id: \.self) { Text($0).tag($0) }
+                Picker("", selection: $engine.model) {
+                    ForEach(engine.modelOptions, id: \.self) { Text($0).tag($0) }
                 }
                 .labelsHidden()
             }
 
             row("Language") {
-                Picker("", selection: $app.language) {
-                    ForEach(app.languageOptions, id: \.code) { lang in
+                Picker("", selection: $engine.language) {
+                    ForEach(engine.languageOptions, id: \.code) { lang in
                         Text(lang.label).tag(lang.code)
                     }
                 }
@@ -40,15 +41,15 @@ struct QuickBarView: View {
             }
 
             row("Template") {
-                Picker("", selection: $app.template) {
-                    ForEach(app.templateOptions, id: \.self) { Text($0.capitalized).tag($0) }
+                Picker("", selection: $engine.template) {
+                    ForEach(engine.templateOptions, id: \.self) { Text($0.capitalized).tag($0) }
                 }
                 .labelsHidden()
             }
 
-            if app.diarizationEnabled {
+            if engine.diarizationEnabled {
                 row("Speakers") {
-                    Picker("", selection: $app.speakerCount) {
+                    Picker("", selection: $engine.speakerCount) {
                         Text("Auto").tag(0)
                         ForEach(1...8, id: \.self) { Text("\($0)").tag($0) }
                     }

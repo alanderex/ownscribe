@@ -28,6 +28,7 @@ bin/
 
 # Swift build artifacts
 swift/.build/
+macapp/.build/
 
 # Config with secrets
 .env

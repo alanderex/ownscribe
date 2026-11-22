@@ -1,8 +1,14 @@
 import SwiftUI
 
-/// Root of the menu-bar popover. Switches content on the app phase.
+/// Root of the menu-bar popover: the recorder. Shows the most pressing state:
+/// setup, a failure, a running recording or job, or the idle recorder. Meetings
+/// open in the window.
 struct MenuContentView: View {
-    @EnvironmentObject var app: AppState
+    @Environment(Engine.self) private var engine
+    @Environment(Recorder.self) private var recorder
+    @Environment(Jobs.self) private var jobs
+    @Environment(Library.self) private var library
+    @Environment(WindowCoordinator.self) private var windows
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -10,8 +16,11 @@ struct MenuContentView: View {
             header
             Divider()
             ScrollView {
-                content
-                    .padding(12)
+                VStack(alignment: .leading, spacing: 12) {
+                    DegradedBanner()
+                    content
+                }
+                .padding(12)
             }
             // A definite height is required: inside a self-sizing MenuBarExtra(.window)
             // popover the system proposes no height, so a maxHeight-only ScrollView
@@ -38,46 +47,50 @@ struct MenuContentView: View {
 
     @ViewBuilder
     private var statusBadge: some View {
-        switch app.phase {
-        case .recording:
+        if recorder.isRecording {
             Label("Recording", systemImage: "record.circle.fill")
                 .foregroundStyle(.red)
                 .font(.caption)
-        case .processing:
+        } else if jobs.isRunning {
             Label("Processing", systemImage: "hourglass")
                 .foregroundStyle(.secondary)
                 .font(.caption)
-        default:
-            EmptyView()
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        switch app.phase {
-        case .installing:
+        if engine.isInstalling {
             InstallingView()
-        case .idle:
-            IdleView()
-        case .recording, .processing:
+        } else if let message = engine.setupFailure {
+            FailedView(message: message, permission: nil)
+        } else if let permission = engine.permissionFailure {
+            FailedView(message: permission.message, permission: permission)
+        } else if recorder.phase != .idle || jobs.isRunning {
             StatusView()
-        case .done:
-            SummaryView()
-        case .failed(let message):
-            FailedView(message: message)
+        } else if case .failed(let message) = jobs.state {
+            FailedView(message: message, permission: nil)
+        } else {
+            IdleView()
         }
     }
 
     private var footer: some View {
         HStack {
             Button {
-                openWindow(id: "settings")
-                NSApp.activate(ignoringOtherApps: true)
+                windows.open(WindowID.main, with: openWindow)
+            } label: {
+                Label("Open Ownscribe", systemImage: "macwindow")
+            }
+            .buttonStyle(.borderless)
+
+            Button {
+                windows.open(WindowID.settings, with: openWindow)
             } label: {
                 Label("Settings", systemImage: "gearshape")
             }
             .buttonStyle(.borderless)
-            .disabled(!app.cli.isInstalled)
+            .disabled(!engine.cli.isInstalled)
 
             Spacer()
 
@@ -90,15 +103,26 @@ struct MenuContentView: View {
     }
 }
 
-/// Idle: quick-bar + record button + recent meetings.
+/// Idle: a finished meeting waiting to be opened, Record, the options for the next
+/// recording (collapsed), and the latest meetings.
 private struct IdleView: View {
-    @EnvironmentObject var app: AppState
+    @Environment(Recorder.self) private var recorder
+    @Environment(Jobs.self) private var jobs
+    @Environment(Library.self) private var library
+    @Environment(WindowCoordinator.self) private var windows
+    @Environment(\.openWindow) private var openWindow
+    @AppStorage("popover.optionsExpanded") private var optionsExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            QuickBarView()
+            if let ready = readyFolder {
+                ReadyBanner(path: ready, title: title(of: ready)) {
+                    library.markSeen(ready)
+                    windows.open(meeting: ready, with: openWindow)
+                }
+            }
 
-            Button(action: app.startRecording) {
+            Button(action: recorder.start) {
                 Label("Start Recording", systemImage: "record.circle")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
@@ -106,41 +130,55 @@ private struct IdleView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
 
-            if !app.recentMeetings.isEmpty {
-                RecentView()
+            DisclosureGroup("Options", isExpanded: $optionsExpanded) {
+                QuickBarView()
+                    .padding(.top, 8)
+            }
+
+            let recent = library.recentRows(5)
+            if !recent.isEmpty {
+                RecentView(rows: recent)
             }
         }
     }
+
+    /// The meeting the last run produced, until it is opened.
+    private var readyFolder: String? {
+        guard let folder = jobs.lastFinished?.folder, library.unseen.contains(folder) else { return nil }
+        return folder
+    }
+
+    private func title(of path: String) -> String {
+        library.rows.first { $0.path == path }?.title
+            ?? FolderName.title(URL(fileURLWithPath: path).lastPathComponent)
+    }
 }
 
-private struct FailedView: View {
-    @EnvironmentObject var app: AppState
-    let message: String
+/// "Ready · Open": a run finished while the user was elsewhere. Nothing takes
+/// focus by itself; this, the row badge and the icon's dot say so instead.
+private struct ReadyBanner: View {
+    let path: String
+    let title: String
+    let open: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(
-                app.isPermissionFailure ? "Permission needed" : "Something went wrong",
-                systemImage: app.isPermissionFailure
-                    ? "lock.shield" : "exclamationmark.triangle.fill"
-            )
-            .foregroundStyle(.orange)
-            .font(.headline)
-            Text(message)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                // The pane is several levels deep in System Settings and the app
-                // cannot grant this itself, so offer the shortcut rather than prose.
-                if app.isPermissionFailure {
-                    Button("Open Settings") { app.openPermissionSettings() }
-                        .buttonStyle(.borderedProminent)
-                }
-                Button("Back") { app.backToIdle() }
-                    .buttonStyle(.bordered)
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Ready").font(.caption).foregroundStyle(.secondary)
+                Text(title).font(.callout).lineLimit(1)
             }
+            Spacer()
+            Button("Open", action: open)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
         }
+        .padding(10)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Ready: \(title)")
+        .accessibilityAction(named: "Open", open)
     }
 }
