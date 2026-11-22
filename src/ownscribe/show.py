@@ -245,6 +245,7 @@ def meeting_rows(config: Config) -> dict:
 def _row(config: Config, folder: Path) -> dict:
     transcript = read_transcript(folder)
     result = transcript.result if transcript else None
+    speakers = _speaker_labels(result)
     day = folder_day(folder.name)
     return {
         "path": str(folder),
@@ -252,22 +253,26 @@ def _row(config: Config, folder: Path) -> dict:
         "created": _created(folder),
         "title": folder_title(folder.name),
         "duration": _duration(result),
-        "speaker_count": _speaker_count(result),
+        "speaker_count": len(speakers),
+        "speakers": speakers,
         "status": _status(config, folder),
     }
 
 
-def _speaker_count(result: TranscriptResult | None) -> int:
-    """How many speakers `speaker_stats(build_turns(result))` lists, without building turns.
+def _speaker_labels(result: TranscriptResult | None) -> list[str]:
+    """The speakers `speaker_stats(build_turns(result))` lists, in the same order, without
+    building turns.
 
     A speaker counts once a segment with text is theirs, the rule build_turns
     applies; without diarization every speaker is None and none count. A library
-    row shows only the count, and `show --list` reads every transcript on each
-    refresh, so it skips joining the turn texts.
+    row needs only the names (the app offers them when naming speakers elsewhere),
+    and `show --list` reads every transcript on each refresh, so it skips joining
+    the turn texts.
     """
     if result is None:
-        return 0
-    return len({seg.speaker for seg in result.segments if seg.speaker is not None and seg.text.strip()})
+        return []
+    labels = (seg.speaker for seg in result.segments if seg.speaker is not None and seg.text.strip())
+    return list(dict.fromkeys(labels))
 
 
 def _created(folder: Path) -> str | None:

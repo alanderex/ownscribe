@@ -355,7 +355,7 @@ class TestMeetingRows:
         ],
     )
     def test_speaker_count_matches_the_detail_view(self, config, segments, expected):
-        """The row counts speakers without building turns; it must agree with `show DIR`."""
+        """The row names speakers without building turns; it must agree with `show DIR`."""
         folder = _folder(config, "260103-sync")
         (folder / "transcript.json").write_text(
             format_transcript_json(TranscriptResult(segments=segments, language="en", duration=3.0))
@@ -364,7 +364,8 @@ class TestMeetingRows:
         [row] = meeting_rows(config)["meetings"]
 
         assert row["speaker_count"] == expected
-        assert row["speaker_count"] == len(meeting_detail(config, folder)["speakers"])
+        assert row["speakers"] == [s["label"] for s in meeting_detail(config, folder)["speakers"]]
+        assert row["speaker_count"] == len(row["speakers"])
 
     def test_missing_output_dir_is_an_empty_library(self, config):
         assert meeting_rows(config) == {"schema": 1, "meetings": []}
