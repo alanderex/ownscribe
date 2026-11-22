@@ -264,6 +264,46 @@ class TestMeetingRows:
         assert second["status"]["summary"] == "present"
         assert first["created"] is not None and first["created"][:4].isdigit()
 
+    @pytest.mark.parametrize(
+        ("segments", "expected"),
+        [
+            pytest.param(
+                [
+                    Segment(text="Hello.", start=0.0, end=1.0, speaker="SPEAKER_00"),
+                    Segment(text="Hi.", start=1.0, end=2.0, speaker="SPEAKER_01"),
+                    Segment(text="Again.", start=2.0, end=3.0, speaker="SPEAKER_00"),
+                ],
+                2,
+                id="diarized",
+            ),
+            pytest.param(
+                [Segment(text="Hello.", start=0.0, end=1.0), Segment(text="Hi.", start=1.0, end=2.0)],
+                0,
+                id="speakerless",
+            ),
+            pytest.param(
+                [
+                    Segment(text="Hello.", start=0.0, end=1.0, speaker="SPEAKER_00"),
+                    Segment(text="Mumble.", start=1.0, end=2.0, speaker=None),
+                    Segment(text="  ", start=2.0, end=3.0, speaker="SPEAKER_01"),
+                ],
+                1,
+                id="unlabelled-and-empty",
+            ),
+        ],
+    )
+    def test_speaker_count_matches_the_detail_view(self, config, segments, expected):
+        """The row counts speakers without building turns; it must agree with `show DIR`."""
+        folder = _folder(config, "260103-sync")
+        (folder / "transcript.json").write_text(
+            format_transcript_json(TranscriptResult(segments=segments, language="en", duration=3.0))
+        )
+
+        [row] = meeting_rows(config)["meetings"]
+
+        assert row["speaker_count"] == expected
+        assert row["speaker_count"] == len(meeting_detail(config, folder)["speakers"])
+
     def test_missing_output_dir_is_an_empty_library(self, config):
         assert meeting_rows(config) == {"schema": 1, "meetings": []}
 

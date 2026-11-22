@@ -79,21 +79,24 @@ def parse_transcript(text: str) -> TranscriptResult | None:
         if not line or line.startswith("# "):
             continue
 
-        if line.startswith("**Language:**"):
-            language = line.removeprefix("**Language:**").strip()
-            continue
-        if m := _DURATION_RE.match(line):
-            duration = float(_parse_time(m))
-            continue
-        if _METADATA_RE.match(line):
-            continue
-
-        if m := _SPEAKER_LINE_RE.match(line):
-            speaker = m.group("speaker").strip()
-            segments.append(Segment(text="", start=_parse_time(m), end=0.0, speaker=speaker))
-            continue
-
-        if m := _STAMPED_LINE_RE.match(line):
+        # Only lines starting with `**` can be metadata or a speaker header, and only
+        # lines starting with `[` can be stamped; anything else is a body line. Checking
+        # that first spares most lines three regex calls, which counts because
+        # `show --list` reads every transcript in the library on each refresh.
+        if line.startswith("**"):
+            if line.startswith("**Language:**"):
+                language = line.removeprefix("**Language:**").strip()
+                continue
+            if m := _DURATION_RE.match(line):
+                duration = float(_parse_time(m))
+                continue
+            if _METADATA_RE.match(line):
+                continue
+            if m := _SPEAKER_LINE_RE.match(line):
+                speaker = m.group("speaker").strip()
+                segments.append(Segment(text="", start=_parse_time(m), end=0.0, speaker=speaker))
+                continue
+        elif line.startswith("[") and (m := _STAMPED_LINE_RE.match(line)):
             segments.append(Segment(text=m.group("text").strip(), start=_parse_time(m), end=0.0, speaker=speaker))
             continue
 
