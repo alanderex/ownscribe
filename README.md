@@ -208,6 +208,7 @@ ownscribe edit-speakers ./260220-1736 --revert              # undo every speaker
 ownscribe edit-speakers ./260220-1736 --assign 42=Anna --revision <rev>  # move one transcript line to Anna
 ownscribe tag ./260220-1736 --add ClientX --remove Draft  # tag a meeting (an existing tag's spelling is kept)
 ownscribe tags --json               # every tag with its number of meetings (JSON)
+ownscribe title ./260220-1736 "Q2 Sales Review"  # a title of its own, shown as typed (the folder keeps its name)
 ownscribe tags --delete ClientX     # remove a tag from every meeting
 ownscribe config                   # open config file in $EDITOR
 ownscribe config get               # print effective config as JSON

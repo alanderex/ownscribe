@@ -514,6 +514,19 @@ def tag_cmd(ctx: click.Context, directory: str, adds: tuple[str, ...], removes: 
     click.echo(f"Tags of {folder.name}: {', '.join(tags) if tags else '(none)'}")
 
 
+@cli.command("title")
+@click.argument("directory", type=click.Path(exists=True, file_okay=False))
+@click.argument("title")
+def title_cmd(directory: str, title: str) -> None:
+    """Give a meeting a title of its own, shown as typed; the folder keeps its name."""
+    from pathlib import Path
+
+    from ownscribe.titles import set_title
+
+    folder = Path(directory).resolve()
+    click.echo(f"Title of {folder.name}: {set_title(folder, title)}")
+
+
 @cli.command("tags")
 @click.option("--json", "as_json", is_flag=True, help="Print every tag with its number of meetings, as JSON.")
 @click.option("--delete", "delete", default=None, metavar="TAG", help="Remove TAG from every meeting.")

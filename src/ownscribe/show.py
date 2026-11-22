@@ -25,6 +25,7 @@ from ownscribe.meeting_files import ORIGINAL_NAMES, TRANSCRIPT_NAMES, meeting_fo
 from ownscribe.meeting_meta import read_meta, summary_is_stale
 from ownscribe.pipeline import _find_summary, find_meeting_audio
 from ownscribe.tags import LibraryTag, group_tags, in_library_spelling, meeting_tags, tags_listing
+from ownscribe.titles import stored_title
 from ownscribe.transcript_io import read_transcript
 from ownscribe.transcription.models import Segment, TranscriptResult
 
@@ -207,7 +208,7 @@ def meeting_detail(config: Config, directory: Path) -> dict:
     meta = read_meta(directory)
     return {
         "schema": SCHEMA_VERSION,
-        "title": folder_title(directory.name),
+        "title": _title(directory, meta),
         "language": (result.language or None) if result else None,
         "duration": _duration(result),
         "revision": transcript.revision if transcript else None,
@@ -260,13 +261,18 @@ def _row(config: Config, folder: Path, meta: dict, library: dict[str, LibraryTag
         "path": str(folder),
         "name_day": day.isoformat() if day else None,
         "created": _created(folder),
-        "title": folder_title(folder.name),
+        "title": _title(folder, meta),
         "duration": _duration(result),
         "speaker_count": len(speakers),
         "speakers": speakers,
         "tags": in_library_spelling(meeting_tags(folder, meta), library),
         "status": _status(config, folder, meta),
     }
+
+
+def _title(folder: Path, meta: dict) -> str:
+    """The title set for the meeting (`ownscribe title`), else its folder's."""
+    return stored_title(folder, meta) or folder_title(folder.name)
 
 
 def _speaker_labels(result: TranscriptResult | None) -> list[str]:
