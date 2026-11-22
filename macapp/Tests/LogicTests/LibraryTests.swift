@@ -38,6 +38,19 @@ final class LibraryTests: XCTestCase {
         XCTAssertFalse(rows[0].status.hasSummary)
     }
 
+    func testDecodesSpeakerNamesAndBusyFolders() throws {
+        let json = #"""
+        {"schema": 1, "meetings": [{"path": "/n/a", "name_day": null, "created": null, "title": "A",
+          "duration": null, "speaker_count": 2, "speakers": ["Anna", "SPEAKER_01"],
+          "status": {"transcript": "present", "summary": "present", "audio": null, "orig": false,
+                     "busy": true, "holder_pid": 4711, "summary_stale": false}}]}
+        """#
+        let rows = try LibraryListing.decode(Data(json.utf8))
+        XCTAssertEqual(rows[0].speakers, ["Anna", "SPEAKER_01"])
+        XCTAssertEqual(rows[0].status.busy, .busy)
+        XCTAssertEqual(rows[0].status.holderPid, 4711)
+    }
+
     func testRefusesAnUnknownSchema() {
         let json = #"{"schema": 2, "meetings": []}"#
         XCTAssertThrowsError(try LibraryListing.decode(Data(json.utf8))) { error in

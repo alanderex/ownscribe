@@ -3,17 +3,71 @@ import Foundation
 /// One meeting folder as `ownscribe show --list --json` describes it.
 struct LibraryRow: Decodable, Identifiable, Hashable {
     struct Status: Decodable, Hashable {
+        /// Whether a process holds the folder's lock. `unknown` on a volume where locks
+        /// cannot be read: such a folder stays in the Library and editable.
+        enum Busy: Hashable {
+            case free, busy, unknown
+        }
+
         /// "present" or "missing".
         let transcript: String
         /// "present", "missing" or "disabled".
         let summary: String
         /// The recording, found by the CLI (it knows output.audio_dir); nil when none is kept.
         let audio: String?
-        /// Whether original-name copies exist, i.e. speakers were renamed.
+        /// Whether copies from before a speaker edit exist, so Restore can put them back.
         let orig: Bool
+        let busy: Busy
+        /// The process holding the folder's lock, when one does.
+        let holderPid: Int?
+        /// The summary was written before speakers were moved.
+        let summaryStale: Bool
 
         var hasTranscript: Bool { transcript == "present" }
         var hasSummary: Bool { summary == "present" }
+
+        enum CodingKeys: String, CodingKey {
+            case transcript, summary, audio, orig, busy
+            case holderPid = "holder_pid"
+            case summaryStale = "summary_stale"
+        }
+
+        init(
+            transcript: String, summary: String, audio: String?, orig: Bool,
+            busy: Busy = .free, holderPid: Int? = nil, summaryStale: Bool = false
+        ) {
+            self.transcript = transcript
+            self.summary = summary
+            self.audio = audio
+            self.orig = orig
+            self.busy = busy
+            self.holderPid = holderPid
+            self.summaryStale = summaryStale
+        }
+
+        /// Fields added after schema 1 shipped are optional, so a row from an older CLI
+        /// still decodes: free, not stale.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            transcript = try c.decode(String.self, forKey: .transcript)
+            summary = try c.decode(String.self, forKey: .summary)
+            audio = try c.decodeIfPresent(String.self, forKey: .audio)
+            orig = try c.decode(Bool.self, forKey: .orig)
+            holderPid = try c.decodeIfPresent(Int.self, forKey: .holderPid)
+            summaryStale = try c.decodeIfPresent(Bool.self, forKey: .summaryStale) ?? false
+            if !c.contains(.busy) {
+                busy = .free
+            } else if let flag = try? c.decode(Bool.self, forKey: .busy) {
+                busy = flag ? .busy : .free
+            } else {
+                let word = try c.decode(String.self, forKey: .busy)
+                guard word == "unknown" else {
+                    throw DecodingError.dataCorruptedError(
+                        forKey: .busy, in: c, debugDescription: "busy is true, false or \"unknown\", not \(word)")
+                }
+                busy = .unknown
+            }
+        }
     }
 
     let path: String
@@ -24,6 +78,8 @@ struct LibraryRow: Decodable, Identifiable, Hashable {
     let title: String
     let duration: Double?
     let speakerCount: Int
+    /// The meeting's speaker labels, named or not: names offered when naming speakers.
+    let speakers: [String]
     let status: Status
 
     /// Meetings are keyed by folder path.
@@ -35,9 +91,35 @@ struct LibraryRow: Decodable, Identifiable, Hashable {
     var isMeeting: Bool { status.hasTranscript || status.hasSummary }
 
     enum CodingKeys: String, CodingKey {
-        case path, created, title, duration, status
+        case path, created, title, duration, status, speakers
         case nameDay = "name_day"
         case speakerCount = "speaker_count"
+    }
+
+    init(
+        path: String, nameDay: String?, created: String?, title: String, duration: Double?,
+        speakerCount: Int, speakers: [String] = [], status: Status
+    ) {
+        self.path = path
+        self.nameDay = nameDay
+        self.created = created
+        self.title = title
+        self.duration = duration
+        self.speakerCount = speakerCount
+        self.speakers = speakers
+        self.status = status
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path = try c.decode(String.self, forKey: .path)
+        nameDay = try c.decodeIfPresent(String.self, forKey: .nameDay)
+        created = try c.decodeIfPresent(String.self, forKey: .created)
+        title = try c.decode(String.self, forKey: .title)
+        duration = try c.decodeIfPresent(Double.self, forKey: .duration)
+        speakerCount = try c.decode(Int.self, forKey: .speakerCount)
+        speakers = try c.decodeIfPresent([String].self, forKey: .speakers) ?? []
+        status = try c.decode(Status.self, forKey: .status)
     }
 }
 
