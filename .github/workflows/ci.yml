@@ -23,6 +23,11 @@ jobs:
     runs-on: macos-15
     env:
       CI: "true"
+      # llama-cpp-python builds from source. With native tuning on, llama.cpp compiles
+      # for "-mcpu=native+noi8mm" on the runner's virtual CPU, and Xcode 16.4's clang
+      # rejects that combination in llama.cpp's i8mm code. The tests never run a
+      # model, so a generic arm64 build is enough.
+      CMAKE_ARGS: "-DGGML_NATIVE=OFF"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
