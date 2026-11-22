@@ -39,7 +39,10 @@ struct MeetingDetailView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     MeetingHeader(
                         row: row, language: document?.language,
-                        day: library.calendar.day(of: row), time: library.calendar.time(of: row)
+                        day: library.calendar.day(of: row), time: library.calendar.time(of: row),
+                        // An older CLI has no `title`.
+                        titleEditable: !engine.isDegraded,
+                        titleReadOnlyReason: isProcessing ? Library.titleBusyMessage : nil
                     )
                     // An older CLI has no tags.
                     if !engine.isDegraded {
@@ -404,19 +407,98 @@ private extension View {
     }
 }
 
+/// The meeting's title and facts. The title can be renamed in place: the pencil or a
+/// double-click opens it for editing, Return saves it with `ownscribe title`, Esc
+/// leaves it as it was.
 struct MeetingHeader: View {
+    @Environment(Library.self) private var library
     let row: LibraryRow
     let language: String?
     let day: Date?
     let time: Date?
+    /// Whether this CLI can rename meetings at all.
+    let titleEditable: Bool
+    /// Why the title cannot change now (a job works on the meeting); nil when it can.
+    let titleReadOnlyReason: String?
+
+    @State private var isEditing = false
+    @State private var draft = ""
+    @State private var isSaving = false
+    @State private var problem: String?
+    /// The title just saved, shown until the library lists it.
+    @State private var savedTitle: String?
+    @FocusState private var fieldFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(row.title)
-                .font(.largeTitle.weight(.semibold))
-                .textSelection(.enabled)
+            if isEditing {
+                TextField("Title", text: $draft)
+                    .font(.largeTitle.weight(.semibold))
+                    .textFieldStyle(.plain)
+                    .focused($fieldFocused)
+                    .disabled(isSaving)
+                    .onSubmit(save)
+                    .onExitCommand { isEditing = false }
+                    .task { fieldFocused = true }
+                    .accessibilityLabel("Meeting title")
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(savedTitle ?? row.title)
+                        .font(.largeTitle.weight(.semibold))
+                        .onTapGesture(count: 2) { if canRename { startEditing() } }
+                    if titleEditable {
+                        Button(action: startEditing) {
+                            Image(systemName: "pencil")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(!canRename)
+                        .help(titleReadOnlyReason ?? "Rename this meeting")
+                        .accessibilityLabel("Rename meeting")
+                    }
+                }
+            }
+            if isSaving {
+                ProgressView().controlSize(.small)
+            }
+            if let problem {
+                Text(problem)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
             Text(facts)
                 .foregroundStyle(.secondary)
+        }
+        .onChange(of: row.path) {
+            isEditing = false
+            problem = nil
+            savedTitle = nil
+        }
+        .onChange(of: row.title) { savedTitle = nil }
+    }
+
+    private var canRename: Bool { titleEditable && titleReadOnlyReason == nil && !isSaving }
+
+    private func startEditing() {
+        draft = row.title
+        problem = nil
+        isEditing = true
+    }
+
+    /// An unchanged or empty title just closes the field; a refusal keeps it open.
+    private func save() {
+        let title = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, title != row.title else {
+            isEditing = false
+            return
+        }
+        isSaving = true
+        Task {
+            problem = await library.setTitle(of: row, to: title)
+            isSaving = false
+            if problem == nil {
+                savedTitle = title
+                isEditing = false
+            }
         }
     }
 

@@ -136,6 +136,21 @@ final class Library {
 
     /// What a meeting's tags show while a process works on its folder.
     static let tagsBusyMessage = "Processing… Tags can be changed when this meeting is done."
+    /// What a meeting's title shows while a process works on its folder.
+    static let titleBusyMessage = "Processing… The title can be changed when this meeting is done."
+
+    /// Gives a meeting a title of its own with `ownscribe title`, then lists the
+    /// library again. Returns why it failed, or nil.
+    func setTitle(of row: LibraryRow, to title: String) async -> String? {
+        let result = await engine.cli.setTitle(row.url, title)
+        guard result.ok else {
+            if result.exitCode == OwnscribeCLI.busyExitCode { return Self.titleBusyMessage }
+            return FailureText.firstMeaningfulLine(result.stderr)
+                ?? "Renaming the meeting failed (exit \(result.exitCode))."
+        }
+        refresh()
+        return nil
+    }
 
     /// Adds and removes a meeting's tags with `ownscribe tag`, then lists the library
     /// again so its rows and tag counts follow. Returns why it failed, or nil.

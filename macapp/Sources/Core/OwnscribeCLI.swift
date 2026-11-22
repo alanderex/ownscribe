@@ -246,6 +246,11 @@ final class OwnscribeCLI {
         await run(["edit-speakers", folder.path] + arguments)
     }
 
+    /// Gives a meeting a title of its own (`ownscribe title`); the folder keeps its name.
+    func setTitle(_ folder: URL, _ title: String) async -> CommandResult {
+        await run(["title", folder.path, title])
+    }
+
     /// Removes a tag from every meeting (`ownscribe tags --delete`).
     func deleteTag(_ name: String) async -> CommandResult {
         await run(["tags", "--delete", name])
