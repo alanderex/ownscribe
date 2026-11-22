@@ -208,11 +208,19 @@ missing Screen Recording grant for the app.
   detail pane shows a meeting's summary or transcript (from `ownscribe show DIR
   --json`); clicking a line plays the recording from there. The toolbar has Record
   (▾ for the options) and a search field for titles and summaries (⌘F).
+- **Tags**: chips under a meeting's title; × removes one, "+ Tag" adds one and
+  offers the library's tags as you type (a tag the library has keeps its
+  spelling). The sidebar's Tags section lists every tag with its number of
+  meetings; picking tags shows the meetings with any of them, together with the
+  search field. A tag's context menu deletes it from every meeting. Each change
+  runs `ownscribe tag` or `ownscribe tags --delete`.
 - **Options** (per-run): title, capture source, Whisper model, language, template,
   and — when diarization is enabled — speaker count. These are passed as CLI
   flags for that recording only; they don't rewrite config.
 - **Settings** (defaults, rarely changed, ⌘,): backend/model/host/API key, HF
   token, diarization, output folder. Each control writes via `ownscribe config set`.
+  With oMLX (or another OpenAI-compatible server) as the summarization backend,
+  the model is picked from the models the server lists (`ownscribe models --json`).
 - **Recording**: launches the full `ownscribe` pipeline; **Stop** sends `SIGINT`,
   which stops recording ("Finalizing…" while the tracks merge) and lets it
   continue to transcribe + summarize.
@@ -245,8 +253,8 @@ macapp/
     Model/                    Engine, Recorder, Jobs, Library, SpeakerEditor
                               (@Observable), AppModel, WindowCoordinator, TurnPlayer
     Logic/                    Foundation-only logic, unit-tested: events, library
-                              rows, folder names, playback formats, speaker
-                              drafts, …
+                              rows, tag filter and suggestions, folder names,
+                              playback formats, speaker drafts, …
     Core/                     CommandRunner, OwnscribeCLI, ConfigModel,
                               Meeting, Permissions, DirectoryWatcher
     Views/                    menu content, window, Library/ (sidebar),

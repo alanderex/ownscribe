@@ -88,10 +88,10 @@ Works with any app that outputs audio through Core Audio (Zoom, Teams, Meet, etc
 
 A native SwiftUI app lives in [`macapp/`](macapp/README.md): a recorder in the
 menu bar and a window with your meetings, their summaries and transcripts,
-playback from any transcript line, and a speaker editor to name, merge, and move
-lines between speakers. It drives this CLI as a subprocess — config, recordings
-and output are shared — and renders live pipeline progress. See
-`macapp/README.md` for building it.
+playback from any transcript line, a speaker editor to name, merge, and move
+lines between speakers, and tags to group meetings and filter the library. It
+drives this CLI as a subprocess — config, recordings and output are shared — and
+renders live pipeline progress. See `macapp/README.md` for building it.
 
 ## Installation
 
