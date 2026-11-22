@@ -159,6 +159,9 @@ class TestResolvedHost:
         assert SummarizationConfig(backend="ollama").resolved_host == "http://localhost:11434"
         assert SummarizationConfig(backend="openai").resolved_host == "http://localhost:11434"
 
+    def test_omlx_defaults_to_its_own_address(self):
+        assert SummarizationConfig(backend="omlx").resolved_host == "http://127.0.0.1:8000/v1"
+
     def test_host_is_empty_by_default(self):
         # Empty means "the backend's default", so switching backends never keeps
         # another backend's port.

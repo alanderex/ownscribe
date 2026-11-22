@@ -46,7 +46,7 @@ All audio, transcripts, and summaries remain local.
 - **WhisperX transcription** — fast, accurate speech-to-text with word-level timestamps
 - **Speaker diarization** — optional speaker identification via pyannote (requires HuggingFace token)
 - **Pipeline progress** — live checklist showing transcription, diarization sub-steps, and summarization progress
-- **Local LLM summarization** — structured meeting notes with a built-in model (Phi-4-mini); also supports Ollama, LM Studio, or any OpenAI-compatible server
+- **Local LLM summarization** — structured meeting notes with a built-in model (Phi-4-mini); also supports oMLX, Ollama, LM Studio, or any OpenAI-compatible server
 - **Summarization templates** — built-in presets for meetings, lectures, and quick briefs; define your own in config
 - **Ask your meetings** — ask natural-language questions across all your meeting notes; uses a two-stage LLM pipeline with keyword fallback
   <br><img src="docs/demo-ask.gif" alt="ownscribe ask demo" width="700">
@@ -109,7 +109,7 @@ The built-in local model works out of the box. If you'd rather call a hosted bac
 
 ```bash
 uv add 'ownscribe[ollama]'   # use Ollama
-uv add 'ownscribe[openai]'   # use any OpenAI-compatible server (LM Studio, llama-server, etc.)
+uv add 'ownscribe[openai]'   # use oMLX or any OpenAI-compatible server (LM Studio, llama-server, etc.)
 uv add 'ownscribe[all]'      # install both
 ```
 
@@ -265,10 +265,10 @@ device = "auto"           # "auto" (mps if available), "mps", or "cpu"
 
 [summarization]
 enabled = true
-backend = "local"         # "local" (built-in, no server needed), "ollama", or "openai"
-model = "phi-4-mini"      # local: "phi-4-mini", path to GGUF, or hf:owner/repo/file.gguf; ollama/openai: model name
-# host = ""               # only for server backends; empty = the backend's default (ollama/openai: http://localhost:11434)
-# api_key = ""            # only for openai backend; required by servers like oMLX (or set OPENAI_API_KEY)
+backend = "local"         # "local" (built-in, no server needed), "ollama", "openai", or "omlx"
+model = "phi-4-mini"      # local: "phi-4-mini", path to GGUF, or hf:owner/repo/file.gguf; servers: model name
+# host = ""               # server backends; empty = default (ollama/openai: localhost:11434, omlx: 127.0.0.1:8000/v1)
+# api_key = ""            # openai and omlx backends; oMLX requires one (or set OPENAI_API_KEY)
 # template = "meeting"    # "meeting", "lecture", "brief", or a custom name
 # context_size = 0        # context window in tokens; 0 = auto-detect (8192 for local). Longer
                           # transcripts are summarized in chunks and merged, whatever the size.
@@ -316,6 +316,20 @@ segment boundaries, and the partial notes are then merged into one summary under
 custom templates included. Shorter meetings are summarized in a single pass as before. Set
 `context_size` in `[summarization]` if a model's window should not be auto-detected; for the local
 backend it also sets the window the model is loaded with.
+
+### oMLX
+
+oMLX serves MLX models on Apple silicon through an OpenAI-compatible API. To
+summarize with a model it serves, set in `[summarization]`:
+
+```toml
+backend = "omlx"
+model = "..."             # a model name oMLX serves
+api_key = "..."           # oMLX's API key (or set OPENAI_API_KEY)
+```
+
+`host` defaults to `http://127.0.0.1:8000/v1`, oMLX's own address. ownscribe does not ask oMLX for
+the model's context window, so `context_size` stays 8192 tokens unless you set it.
 
 ## Speaker Diarization
 

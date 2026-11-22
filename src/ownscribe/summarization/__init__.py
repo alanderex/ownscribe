@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 _INSTALL_HINTS = {
     "openai": "uv add 'ownscribe[openai]'",
     "ollama": "uv add 'ownscribe[ollama]'",
+    "omlx": "uv add 'ownscribe[openai]'",
 }
 
 
@@ -29,7 +30,8 @@ def create_summarizer(config: Config) -> Summarizer:
 
         return LlamaCppSummarizer(config.summarization, config.templates)
     try:
-        if backend == "openai":
+        # oMLX serves MLX models on Apple silicon through an OpenAI-compatible API.
+        if backend in ("openai", "omlx"):
             from ownscribe.summarization.openai_summarizer import OpenAISummarizer
 
             return OpenAISummarizer(config.summarization, config.templates)

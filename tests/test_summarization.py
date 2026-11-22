@@ -39,6 +39,7 @@ class TestCreateSummarizerMissingDeps:
         [
             ("ollama", "ownscribe.summarization.ollama_summarizer", "ollama"),
             ("openai", "ownscribe.summarization.openai_summarizer", "openai"),
+            ("omlx", "ownscribe.summarization.openai_summarizer", "openai"),
         ],
     )
     def test_missing_backend_dep(self, backend, module, extra):
@@ -47,6 +48,40 @@ class TestCreateSummarizerMissingDeps:
 
         with patch.dict("sys.modules", {module: None}), pytest.raises(ImportError, match=f"ownscribe\\[{extra}\\]"):
             create_summarizer(config)
+
+
+class TestOMLXBackend:
+    """oMLX is reached through the OpenAI-compatible summarizer."""
+
+    def test_factory_returns_the_openai_compatible_summarizer(self):
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        config = Config()
+        config.summarization.backend = "omlx"
+        assert isinstance(create_summarizer(config), OpenAISummarizer)
+
+    def test_default_address_is_omlx_own(self):
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        summarizer = OpenAISummarizer(SummarizationConfig(backend="omlx", model="m"))
+        assert str(summarizer._client.base_url) == "http://127.0.0.1:8000/v1/"
+
+    def test_summarizes_with_the_api_key(self, httpserver):
+        response_body = {
+            "id": "chatcmpl-test",
+            "object": "chat.completion",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "Notes"}, "finish_reason": "stop"}],
+            "model": "m",
+        }
+        httpserver.expect_request(
+            "/v1/chat/completions", method="POST", headers={"Authorization": "Bearer omlx-key"}
+        ).respond_with_json(response_body)
+        config = SummarizationConfig(host=httpserver.url_for(""), backend="omlx", model="m", api_key="omlx-key")
+
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        assert OpenAISummarizer(config).summarize("Anna: Hello") == "Notes"
+        assert _request_body(httpserver, "/v1/chat/completions")["model"] == "m"
 
 
 class TestCleanResponse:

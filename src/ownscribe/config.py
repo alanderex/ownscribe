@@ -38,10 +38,10 @@ device = "auto"           # "auto" (mps if available), "mps", or "cpu"
 
 [summarization]
 enabled = true
-backend = "local"         # "local" (built-in, no server needed), "ollama", or "openai"
-model = "phi-4-mini"      # local: "phi-4-mini", path to GGUF, or hf:owner/repo/file.gguf; ollama/openai: model name
-# host = ""               # only for server backends; empty = the backend's default (ollama/openai: http://localhost:11434)
-# api_key = ""            # only for openai backend; required by servers like oMLX (or set OPENAI_API_KEY)
+backend = "local"         # "local" (built-in, no server needed), "ollama", "openai", or "omlx"
+model = "phi-4-mini"      # local: "phi-4-mini", path to GGUF, or hf:owner/repo/file.gguf; servers: model name
+# host = ""               # server backends; empty = default (ollama/openai: localhost:11434, omlx: 127.0.0.1:8000/v1)
+# api_key = ""            # openai and omlx backends; oMLX requires one (or set OPENAI_API_KEY)
 # template = "meeting"    # built-in: "meeting", "lecture", or "brief"
 # context_size = 0        # context window in tokens; 0 = auto-detect (8192 for local). Longer
                           # transcripts are summarized in chunks and merged, whatever the size.
@@ -92,6 +92,8 @@ class DiarizationConfig:
 _DEFAULT_HOSTS = {
     "ollama": "http://localhost:11434",
     "openai": "http://localhost:11434",
+    # oMLX's own default address.
+    "omlx": "http://127.0.0.1:8000/v1",
 }
 
 
@@ -182,7 +184,7 @@ class Config:
 
 
 #: Every summarization backend name the config accepts.
-SUMMARIZATION_BACKENDS = ("local", "ollama", "openai")
+SUMMARIZATION_BACKENDS = ("local", "ollama", "openai", "omlx")
 
 _ENUMS: dict[tuple[str, str], tuple[str, ...]] = {
     ("audio", "backend"): ("coreaudio", "sounddevice"),
