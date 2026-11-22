@@ -22,6 +22,7 @@ from ownscribe.config import (
     OutputConfig,
     SummarizationConfig,
     TranscriptionConfig,
+    coerce_value,
     ensure_config_file,
 )
 
@@ -103,8 +104,9 @@ def set_config_value(key: str, value: str) -> Path:
 
     Creates the config file from the default template if it does not exist.
     Raises ``ValueError`` with an explicit message on an unknown section or key,
-    or a value that cannot be coerced to the field's type. Returns the path
-    written.
+    or a value that loading would refuse (wrong type, a name outside a field's
+    allowed values), so nothing is written that would stop the CLI from starting.
+    Returns the path written.
     """
     if "." not in key:
         raise ValueError(f"Key must be 'section.field' (e.g. summarization.backend), got {key!r}")
@@ -119,7 +121,8 @@ def set_config_value(key: str, value: str) -> Path:
         valid = ", ".join(sorted(field_types))
         raise ValueError(f"Unknown key {field!r} in [{section}]. Valid keys: {valid}")
 
-    coerced = _coerce(section, field, field_types[field], value)
+    typed = _coerce(section, field, field_types[field], value)
+    coerced = coerce_value(section, field, getattr(_SECTIONS[section](), field), typed)
 
     # Ensure the file exists (created from the documented default template), then
     # edit it in place so the user's comments and layout survive.

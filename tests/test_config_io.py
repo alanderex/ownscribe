@@ -84,6 +84,24 @@ class TestSetConfigValue:
         with pytest.raises(ValueError, match=r"section\.field"):
             config_io.set_config_value("backend", "openai")
 
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("summarization.backend", "bogus"),
+            ("audio.capture_mode", "sometimes"),
+            ("output.format", "yaml"),
+            ("diarization.device", "gpu"),
+        ],
+    )
+    def test_refuses_a_value_loading_would_refuse(self, temp_config, key, value):
+        # Writing it would stop every command, `config get` included, from starting.
+        config_io.set_config_value("summarization.model", "phi-4-mini")
+        before = temp_config.read_text()
+        with pytest.raises(ValueError, match="must be one of"):
+            config_io.set_config_value(key, value)
+        assert temp_config.read_text() == before
+        Config.load()
+
     def test_roundtrip_via_load(self, temp_config):
         config_io.set_config_value("summarization.model", "mlx-community--gemma")
         assert Config.load().summarization.model == "mlx-community--gemma"

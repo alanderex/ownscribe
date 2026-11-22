@@ -158,21 +158,27 @@ class Config:
         return config
 
 
+#: Every summarization backend name the config accepts.
+SUMMARIZATION_BACKENDS = ("local", "ollama", "openai")
+
 _ENUMS: dict[tuple[str, str], tuple[str, ...]] = {
     ("audio", "backend"): ("coreaudio", "sounddevice"),
     ("audio", "capture_mode"): ("all", "picker"),
-    ("summarization", "backend"): ("local", "ollama", "openai"),
+    ("summarization", "backend"): SUMMARIZATION_BACKENDS,
     ("output", "format"): ("markdown", "json"),
     ("diarization", "device"): ("auto", "mps", "cpu"),
 }
 
 
-def _coerce(section: str, key: str, current, value):
+def coerce_value(section: str, key: str, current, value):
     """Coerce a TOML value to the field's declared type, or raise ValueError.
 
-    `config set` coerces; a hand-edited config.toml did not, so `mic = "false"`
-    stayed a truthy string (mic silently on) and `silence_timeout = "300"` blew up
-    much later inside a comparison.
+    The one set of rules for config values: loading applies it to config.toml, and
+    `config set` to what it is about to write. A hand-edited config.toml was not
+    checked, so `mic = "false"` stayed a truthy string (mic silently on) and
+    `silence_timeout = "300"` blew up much later inside a comparison; `config set`
+    was not checked either, so it could write a backend that loading then refused,
+    and every command failed from then on.
     """
     want = type(current)
     if isinstance(current, bool):
@@ -209,7 +215,7 @@ def _merge_section(config: Config, data: dict, section: str) -> None:
             # Silently dropping these meant a typo like `hf_tokn` did nothing at all.
             click.echo(f"Warning: unknown config key {section}.{k} — ignored.", err=True)
             continue
-        setattr(target, k, _coerce(section, k, getattr(target, k), v))
+        setattr(target, k, coerce_value(section, k, getattr(target, k), v))
 
 
 def _merge_toml(config: Config, data: dict) -> Config:

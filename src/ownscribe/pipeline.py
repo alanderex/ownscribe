@@ -15,7 +15,7 @@ from pathlib import Path
 
 import click
 
-from ownscribe.config import Config
+from ownscribe.config import SUMMARIZATION_BACKENDS, Config
 from ownscribe.locks import LOCK_NAME, folder_lock, probe
 from ownscribe.meeting_meta import clear_summary_stale
 from ownscribe.progress import (
@@ -330,12 +330,10 @@ def _validate_backends(config: Config) -> None:
     meeting is over, so a typo in config.toml used to cost the user the whole
     recording before surfacing.
     """
-    from ownscribe.summarization import KNOWN_BACKENDS
-
-    if config.summarization.enabled and config.summarization.backend not in KNOWN_BACKENDS:
+    if config.summarization.enabled and config.summarization.backend not in SUMMARIZATION_BACKENDS:
         raise click.ClickException(
             f"Unknown summarization backend {config.summarization.backend!r}. "
-            f"Expected one of: {', '.join(KNOWN_BACKENDS)}."
+            f"Expected one of: {', '.join(SUMMARIZATION_BACKENDS)}."
         )
 
 

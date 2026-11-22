@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ownscribe.config import SUMMARIZATION_BACKENDS
+
 if TYPE_CHECKING:
     from ownscribe.config import Config
     from ownscribe.summarization.base import Summarizer
@@ -13,17 +15,15 @@ _INSTALL_HINTS = {
 }
 
 
-#: Every backend name the config accepts. An unknown name used to fall through to
-#: Ollama, so a typo like "opneai" quietly pointed at localhost and only surfaced
-#: after the meeting had already been recorded.
-KNOWN_BACKENDS = ("local", "ollama", "openai")
-
-
 def create_summarizer(config: Config) -> Summarizer:
     """Create the appropriate summarizer based on config."""
     backend = config.summarization.backend
-    if backend not in KNOWN_BACKENDS:
-        raise ValueError(f"Unknown summarization backend {backend!r}. Expected one of: {', '.join(KNOWN_BACKENDS)}.")
+    # An unknown name used to fall through to Ollama, so a typo like "opneai" quietly
+    # pointed at localhost and only surfaced after the meeting had been recorded.
+    if backend not in SUMMARIZATION_BACKENDS:
+        raise ValueError(
+            f"Unknown summarization backend {backend!r}. Expected one of: {', '.join(SUMMARIZATION_BACKENDS)}."
+        )
     if backend == "local":
         from ownscribe.summarization.llama_cpp_summarizer import LlamaCppSummarizer
 
