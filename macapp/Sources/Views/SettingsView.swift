@@ -149,6 +149,8 @@ private struct SummarizationTab: View {
 
     private var backend: String { engine.config.summarization.backend }
     private var enabled: Bool { engine.config.summarization.enabled }
+    /// Backends whose server lists its models (`ownscribe models`) and may want a key.
+    private var listsModels: Bool { backend == "omlx" || backend == "openai" }
 
     var body: some View {
         Form {
@@ -157,20 +159,28 @@ private struct SummarizationTab: View {
             if enabled {
                 Picker("Backend", selection: engine.stringBinding(\.summarization.backend, key: "summarization.backend")) {
                     Text("Local (built-in)").tag("local")
+                    Text("oMLX").tag("omlx")
                     Text("Ollama").tag("ollama")
                     Text("OpenAI-compatible").tag("openai")
                 }
-                ConfigTextField(title: "Model", key: "summarization.model", keyPath: \.summarization.model)
+                if listsModels {
+                    ServerModelPicker()
+                } else {
+                    ConfigTextField(
+                        title: "Model", key: "summarization.model", keyPath: \.summarization.model,
+                        help: backend == "local" ? "A GGUF model. MLX models run through oMLX." : nil
+                    )
+                }
                 if backend != "local" {
                     ConfigTextField(
                         title: "Host", key: "summarization.host", keyPath: \.summarization.host,
-                        help: "e.g. http://127.0.0.1:8000/v1"
+                        help: "Leave empty for the backend's default."
                     )
                 }
-                if backend == "openai" {
+                if listsModels {
                     ConfigTextField(
                         title: "API key", key: "summarization.api_key", keyPath: \.summarization.apiKey,
-                        secure: true, help: "Required by servers like oMLX."
+                        secure: true, help: backend == "omlx" ? "oMLX requires one." : "If the server requires one."
                     )
                 }
                 Picker("Template", selection: templateBinding) {
@@ -190,6 +200,74 @@ private struct SummarizationTab: View {
             get: { engine.config.summarization.template.isEmpty ? "meeting" : engine.config.summarization.template },
             set: { engine.updateConfig("summarization.template", $0) }
         )
+    }
+}
+
+/// The summarization model, picked from what the omlx or openai server lists. When
+/// the list cannot be had (server not running, key refused) the CLI's reason shows
+/// above a plain text field.
+private struct ServerModelPicker: View {
+    @Environment(Engine.self) private var engine
+    @State private var models: [String] = []
+    @State private var problem: String?
+    @State private var isLoading = false
+
+    private var configured: String { engine.config.summarization.model }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let problem {
+                Text(problem)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                if models.isEmpty {
+                    ConfigTextField(title: "Model", key: "summarization.model", keyPath: \.summarization.model)
+                } else {
+                    Picker("Model", selection: engine.stringBinding(\.summarization.model, key: "summarization.model")) {
+                        ForEach(options, id: \.self) { Text($0).tag($0) }
+                    }
+                }
+                Button {
+                    Task { await load() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                        .labelStyle(.iconOnly)
+                }
+                .disabled(isLoading)
+                .help("List the server's models again")
+            }
+            if engine.config.summarization.backend == "omlx", !models.isEmpty, !models.contains(configured) {
+                Text("oMLX does not serve “\(configured)”. Pick one of its models.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+        }
+        // Asks again when the backend or its address changes.
+        .task(id: "\(engine.config.summarization.backend) \(engine.config.summarization.host)") { await load() }
+    }
+
+    /// The served models, plus the configured one when the server lacks it, so the
+    /// picker never shows a blank selection.
+    private var options: [String] {
+        configured.isEmpty || models.contains(configured) ? models : models + [configured]
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            models = try await engine.cli.models()
+            problem = nil
+        } catch CLIError.command(_, let message) {
+            models = []
+            problem = message
+        } catch {
+            models = []
+            problem = "Couldn't list the server's models: \(error)"
+        }
     }
 }
 

@@ -229,6 +229,17 @@ final class OwnscribeCLI {
         return try await Task.detached { try MeetingDocument.decode(data) }.value
     }
 
+    /// The models the configured omlx or openai summarization server offers. Throws
+    /// with the CLI's reason (not running, key refused) when it cannot list them.
+    func models() async throws -> [String] {
+        let result = await run(["models", "--json"])
+        guard result.ok else {
+            throw CLIError.command("models", FailureText.wholeMessage(result.stderr) ?? "exit \(result.exitCode)")
+        }
+        let data = Data(result.stdout.utf8)
+        return try ServerModels.decode(data).models
+    }
+
     /// Saves speaker edits: renames, merges and line moves, as one SpeakerDraft's arguments.
     func editSpeakers(_ folder: URL, arguments: [String]) async -> CommandResult {
         await run(["edit-speakers", folder.path] + arguments)
