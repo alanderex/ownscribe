@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 import re
 from unittest import mock
 
@@ -1534,3 +1535,95 @@ class TestMeetingSavedEvent:
         assert self._events(capsys) == [
             {"ownscribe_progress": 1, "event": "meeting_saved", "folder": str(tmp_path), "summary": "ok"}
         ]
+
+
+class TestFolderLocking:
+    """A recording run and resume hold the meeting folder's lock while they work."""
+
+    def test_recording_holds_the_folder_lock_until_the_meeting_is_saved(self, tmp_path):
+        from ownscribe.locks import LockState, probe
+        from ownscribe.pipeline import run_pipeline
+
+        config = Config()
+        config.output.dir = str(tmp_path / "notes")
+        seen: list[LockState] = []
+
+        recorder = TestRunPipelineAudioLocation()._make_recorder_mock()
+        write_audio = recorder.start.side_effect
+
+        def start(path):
+            seen.append(probe(path.parent))
+            write_audio(path)
+
+        recorder.start.side_effect = start
+        processed: list[LockState] = []
+        with (
+            mock.patch("ownscribe.pipeline._create_recorder", return_value=recorder),
+            mock.patch(
+                "ownscribe.pipeline._do_transcribe_and_summarize",
+                side_effect=lambda _config, _audio, out_dir: processed.append(probe(out_dir)),
+            ),
+        ):
+            run_pipeline(config)
+
+        [folder] = (tmp_path / "notes").iterdir()
+        assert seen == processed == [LockState(busy=True, holder_pid=os.getpid())]
+        assert probe(folder) == LockState(busy=False)
+
+    def test_resume_refuses_a_folder_another_process_holds(self, tmp_path, hold_folder_lock):
+        import pytest
+
+        from ownscribe.locks import FolderBusyError
+        from ownscribe.pipeline import run_resume
+
+        (tmp_path / "transcript.md").write_text("# Transcript\n\n[00:00] Hello.\n")
+        with (
+            hold_folder_lock(tmp_path) as holder,
+            mock.patch("ownscribe.pipeline.run_summarize") as summarize,
+            pytest.raises(FolderBusyError) as refused,
+        ):
+            run_resume(Config(), str(tmp_path))
+
+        assert refused.value.holder_pid == holder.pid
+        summarize.assert_not_called()
+
+    def test_resume_holds_the_lock_while_it_summarizes(self, tmp_path):
+        from ownscribe.locks import LockState, probe
+        from ownscribe.pipeline import run_resume
+
+        (tmp_path / "transcript.md").write_text("# Transcript\n\n[00:00] Hello.\n")
+        seen: list[LockState] = []
+        with mock.patch(
+            "ownscribe.pipeline.run_summarize", side_effect=lambda _config, path: seen.append(probe(tmp_path))
+        ):
+            run_resume(Config(), str(tmp_path))
+
+        assert seen == [LockState(busy=True, holder_pid=os.getpid())]
+
+    def test_a_title_can_take_the_name_of_a_folder_holding_only_a_free_lock_file(self, tmp_path):
+        from ownscribe.locks import LOCK_NAME
+        from ownscribe.pipeline import _rename_output_dir
+
+        source = tmp_path / "260101-1200"
+        source.mkdir()
+        (source / "transcript.md").write_text("hi")
+        leftover = tmp_path / "260101-budget-review"
+        leftover.mkdir()
+        (leftover / LOCK_NAME).write_text("{}")
+
+        assert _rename_output_dir(source, "budget-review") == leftover
+        assert (leftover / "transcript.md").read_text() == "hi"
+
+    def test_a_folder_whose_lock_is_held_keeps_its_name(self, tmp_path, hold_folder_lock):
+        from ownscribe.pipeline import _rename_output_dir
+
+        source = tmp_path / "260101-1200"
+        source.mkdir()
+        claimed = tmp_path / "260101-budget-review"
+        claimed.mkdir()
+
+        with hold_folder_lock(claimed):
+            renamed = _rename_output_dir(source, "budget-review")
+
+        assert renamed == tmp_path / "260101-budget-review_1200"
+        assert claimed.is_dir()

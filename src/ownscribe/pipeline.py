@@ -16,6 +16,7 @@ from pathlib import Path
 import click
 
 from ownscribe.config import Config
+from ownscribe.locks import LOCK_NAME, folder_lock, probe
 from ownscribe.progress import (
     DownloadProgressEvent,
     PipelineProgress,
@@ -156,7 +157,7 @@ def _rename_output_dir(directory: Path, title_slug: str, *, force_name: str | No
         try:
             # An empty directory is a leftover from an abandoned run; renaming onto it
             # is safe and avoids littering. Only real content blocks the name.
-            if new_dir.exists() and any(new_dir.iterdir()):
+            if new_dir.exists() and not _clear_leftover(new_dir):
                 logger.debug("Not renaming output directory: %s already exists", new_dir)
                 continue
             directory.rename(new_dir)
@@ -167,6 +168,22 @@ def _rename_output_dir(directory: Path, title_slug: str, *, force_name: str | No
             logger.warning("Could not rename output directory to %s: %s", new_dir.name, e)
             return directory
     return directory
+
+
+def _clear_leftover(directory: Path) -> bool:
+    """True when `directory` is a leftover from an abandoned run and may be renamed onto.
+
+    A run claims its folder and locks it straight away, so a run abandoned before it
+    wrote anything leaves a folder holding only a lock file. That file is removed
+    here when no process holds it; a rename onto a non-empty directory would fail.
+    """
+    entries = list(directory.iterdir())
+    if not entries:
+        return True
+    if [entry.name for entry in entries] == [LOCK_NAME] and probe(directory).busy is False:
+        entries[0].unlink()
+        return True
+    return False
 
 
 def _unsupported_sounddevice_settings(config: Config) -> list[str]:
@@ -325,6 +342,15 @@ def run_pipeline(config: Config, title: str | None = None) -> None:
     """Run the full pipeline: record, transcribe, summarize, output."""
     _validate_backends(config)
     out_dir = _get_output_dir(config, title)
+    # Held from the moment the folder is claimed until the meeting is saved: `show`
+    # reports the folder busy, and `edit-speakers` cannot write into it meanwhile. A
+    # freshly claimed folder is free; only the reuse fallback in _get_output_dir can
+    # meet a held one, which then exits 75 and leaves that folder alone.
+    with folder_lock(out_dir, "record"):
+        _record_and_process(config, out_dir)
+
+
+def _record_and_process(config: Config, out_dir: Path) -> None:
     audio_dir = _get_output_audio_dir(config, out_dir)
     audio_path = audio_dir / "recording.wav"
 
@@ -849,6 +875,11 @@ def run_resume(config: Config, directory: str) -> None:
         click.echo(f"Error: {dir_path} is not a directory.", err=True)
         raise SystemExit(1)
 
+    with folder_lock(dir_path, "resume"):
+        _resume_locked(config, dir_path)
+
+
+def _resume_locked(config: Config, dir_path: Path) -> None:
     audio = find_meeting_audio(config, dir_path)
     transcript = _find_transcript(dir_path)
     summary = _find_summary(dir_path)
