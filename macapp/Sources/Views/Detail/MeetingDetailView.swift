@@ -32,35 +32,45 @@ struct MeetingDetailView: View {
     @State private var newSpeakerName = ""
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        MeetingHeader(
-                            row: row, language: document?.language,
-                            day: library.calendar.day(of: row), time: library.calendar.time(of: row)
-                        )
-                        // An older CLI has no tags.
-                        if !engine.isDegraded {
-                            MeetingTagsView(row: row, readOnlyReason: isProcessing ? Library.tagsBusyMessage : nil)
-                        }
-                    }
-                    tabBar
-                    Divider()
-                    switch tab {
-                    case .summary: summaryBody
-                    case .transcript: transcriptBody
+        // The header, the tags and the tab row stay in view; only the summary or the
+        // transcript scrolls under them.
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 10) {
+                    MeetingHeader(
+                        row: row, language: document?.language,
+                        day: library.calendar.day(of: row), time: library.calendar.time(of: row)
+                    )
+                    // An older CLI has no tags.
+                    if !engine.isDegraded {
+                        MeetingTagsView(row: row, readOnlyReason: isProcessing ? Library.tagsBusyMessage : nil)
                     }
                 }
-                // A readable measure: long lines at window width are hard to follow.
-                .frame(maxWidth: 720, alignment: .leading)
-                .padding(28)
-                .frame(maxWidth: .infinity)
+                tabBar
             }
-            .onChange(of: selectedSpeaker) { _, speaker in
-                guard let speaker, let turn = firstTurn(of: speaker) else { return }
-                chosenTab = .transcript
-                withAnimation { proxy.scrollTo(turn, anchor: .top) }
+            .readingMeasure()
+            .padding(.horizontal, 28)
+            .padding(.top, 28)
+            .padding(.bottom, 14)
+            .frame(maxWidth: .infinity)
+            Divider()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        switch tab {
+                        case .summary: summaryBody
+                        case .transcript: transcriptBody
+                        }
+                    }
+                    .readingMeasure()
+                    .padding(28)
+                    .frame(maxWidth: .infinity)
+                }
+                .onChange(of: selectedSpeaker) { _, speaker in
+                    guard let speaker, let turn = firstTurn(of: speaker) else { return }
+                    chosenTab = .transcript
+                    withAnimation { proxy.scrollTo(turn, anchor: .top) }
+                }
             }
         }
         .inspector(isPresented: $inspectorShown) { inspector }
@@ -384,6 +394,13 @@ struct MeetingDetailView: View {
     private static func describe(_ error: Error) -> String {
         if case CLIError.command(_, let message) = error { return "Couldn't read the transcript: \(message)" }
         return "Couldn't read the transcript: \(error)"
+    }
+}
+
+private extension View {
+    /// A readable measure: long lines at window width are hard to follow.
+    func readingMeasure() -> some View {
+        frame(maxWidth: 720, alignment: .leading)
     }
 }
 
