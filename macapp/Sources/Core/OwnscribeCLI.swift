@@ -224,6 +224,11 @@ final class OwnscribeCLI {
         return try await Task.detached { try MeetingDocument.decode(data) }.value
     }
 
+    /// Saves speaker edits: renames, merges and line moves, as one SpeakerDraft's arguments.
+    func editSpeakers(_ folder: URL, arguments: [String]) async -> CommandResult {
+        await run(["edit-speakers", folder.path] + arguments)
+    }
+
     @discardableResult
     func renameSpeakers(_ transcript: URL, mapping: [String: String]) async -> CommandResult {
         var args = ["rename-speakers", transcript.path]

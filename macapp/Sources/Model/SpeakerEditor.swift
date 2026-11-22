@@ -1,10 +1,25 @@
 import Foundation
 import Observation
 
-/// Each meeting's unsaved speaker edits, kept while the user moves between meetings.
+/// Each meeting's unsaved speaker edits, kept while the user moves between meetings,
+/// and saving them with `ownscribe edit-speakers`.
 @MainActor
 @Observable
 final class SpeakerEditor {
+    enum SaveOutcome: Equatable {
+        case saved
+        /// Another process works on the folder; the draft is kept for later.
+        case busy(String)
+        /// The transcript changed since the draft was made, so its line numbers no
+        /// longer hold. Reload, then carryNames(_:to:).
+        case transcriptChanged
+        case failed(String)
+    }
+
+    // edit-speakers' exit codes (src/ownscribe/locks.py, speaker_edits.py).
+    private static let busyExit: Int32 = 75
+    private static let transcriptChangedExit: Int32 = 65
+
     /// Drafts with edits in them, by meeting folder path.
     private(set) var drafts: [String: SpeakerDraft] = [:]
 
@@ -30,5 +45,31 @@ final class SpeakerEditor {
 
     func discard(_ path: String) {
         drafts[path] = nil
+    }
+
+    /// Saves the meeting's draft in one `edit-speakers` call. The draft is dropped only
+    /// once saved; on any refusal it stays for another attempt.
+    func save(_ path: String, with cli: OwnscribeCLI) async -> SaveOutcome {
+        guard let draft = drafts[path], !draft.isEmpty else { return .saved }
+        let result = await cli.editSpeakers(URL(fileURLWithPath: path), arguments: draft.arguments)
+        if result.ok {
+            drafts[path] = nil
+            return .saved
+        }
+        let message = FailureText.firstMeaningfulLine(result.stderr)
+            ?? "Saving the speakers failed (exit \(result.exitCode))."
+        switch result.exitCode {
+        case Self.busyExit: return .busy(message)
+        case Self.transcriptChangedExit: return .transcriptChanged
+        default: return .failed(message)
+        }
+    }
+
+    /// After the transcript changed underneath a draft: its names stay, on a draft of
+    /// the reloaded meeting; its moves are dropped.
+    func carryNames(_ path: String, to document: MeetingDocument) {
+        guard let draft = drafts[path] else { return }
+        let carried = draft.names(appliedTo: SpeakerDraft(document: document))
+        drafts[path] = carried.isEmpty ? nil : carried
     }
 }
