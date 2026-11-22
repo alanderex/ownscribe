@@ -72,4 +72,15 @@ final class SpeakerEditor {
         let carried = draft.names(appliedTo: SpeakerDraft(document: document))
         drafts[path] = carried.isEmpty ? nil : carried
     }
+
+    /// Puts back the transcript and summary as they were before the first speaker
+    /// edit (`edit-speakers --revert`) and drops any draft. Returns the problem, if any.
+    func revert(_ path: String, with cli: OwnscribeCLI) async -> String? {
+        let result = await cli.editSpeakers(URL(fileURLWithPath: path), arguments: ["--revert"])
+        guard result.ok else {
+            return FailureText.firstMeaningfulLine(result.stderr) ?? "Restoring failed (exit \(result.exitCode))."
+        }
+        drafts[path] = nil
+        return nil
+    }
 }

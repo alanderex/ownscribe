@@ -16,8 +16,11 @@ struct SpeakerInspector: View {
     let isSaving: Bool
     /// The last save's problem, shown until the next attempt.
     let problem: String?
+    /// Puts back the files from before the first speaker edit; nil when there are none.
+    let restore: (() -> Void)?
 
     @FocusState private var focusedSpeaker: String?
+    @State private var confirmingRestore = false
 
     var body: some View {
         ScrollView {
@@ -166,6 +169,17 @@ struct SpeakerInspector: View {
                     .buttonStyle(.borderedProminent)
             }
             .disabled(isSaving || readOnlyReason != nil)
+        } else if let restore {
+            Button("Restore Original Names…") { confirmingRestore = true }
+                .disabled(isSaving || readOnlyReason != nil)
+                .confirmationDialog(
+                    "Restore the transcript and summary as they were before the first speaker edit?",
+                    isPresented: $confirmingRestore
+                ) {
+                    Button("Restore", role: .destructive, action: restore)
+                } message: {
+                    Text("Every rename, merge and moved line since then is undone.")
+                }
         }
     }
 }

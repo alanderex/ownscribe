@@ -133,7 +133,8 @@ struct MeetingDetailView: View {
                     saveProblem = nil
                 },
                 isSaving: isSaving,
-                problem: saveProblem
+                problem: saveProblem,
+                restore: document.status.orig ? { Task { await restore() } } : nil
             )
         } else {
             ContentUnavailableView(
@@ -171,6 +172,18 @@ struct MeetingDetailView: View {
             if let document { editor.carryNames(row.path, to: document) }
             saveProblem = "The transcript changed since it was shown. The names are kept; move the lines again."
         }
+    }
+
+    private func restore() async {
+        isSaving = true
+        saveProblem = nil
+        defer { isSaving = false }
+        if let problem = await editor.revert(row.path, with: engine.cli) {
+            saveProblem = problem
+            return
+        }
+        await load()
+        library.refresh()
     }
 
     private func saveInBackground(_ path: String) {
