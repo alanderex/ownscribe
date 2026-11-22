@@ -68,13 +68,14 @@ final class OwnscribeCLI {
     /// named here is what a menu-bar install actually runs, so a fix that is merged
     /// but not tagged reaches nobody. v0.15.2 predates helper checksum verification;
     /// v0.15.3 is the first tag that contains it. v0.16.0 is the first with `show`
-    /// and the folder events the window relies on.
+    /// and the folder events the window relies on; v0.17.0 the first with
+    /// `edit-speakers`, the folder lock and `resume --resummarize`.
     ///
     /// This is deliberately NOT the app's own version. CFBundleShortVersionString
     /// tracks the bundle; this tracks the CLI the bundle installs. A Swift-only
     /// release bumps the former and leaves this alone — otherwise needsUpgrade
     /// fires and every user reinstalls ownscribe for no change at all.
-    static let macappRelease = "macapp-v0.16.0"
+    static let macappRelease = "macapp-v0.17.0"
 
     private static let pipSpec =
         "ownscribe[all] @ git+https://github.com/alanderex/ownscribe@\(macappRelease)"
