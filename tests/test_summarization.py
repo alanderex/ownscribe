@@ -1116,6 +1116,33 @@ class TestSummarizeSingleShot:
         assert text in summarizer.completions[0][1]
 
 
+class TestSummarizeInstructions:
+    def test_instructions_join_the_system_prompt(self):
+        summarizer = _RecordingSummarizer(SummarizationConfig(context_size=8192))
+
+        summarizer.summarize("SPEAKER_00: Short meeting.", "  Write it in German.  ")
+
+        [(system, _user)] = summarizer.completions
+        assert system.startswith(resolve_template("meeting", {})[0])
+        assert system.endswith("Also follow these instructions from the user:\nWrite it in German.")
+
+    def test_every_chunk_and_the_merge_follow_them(self):
+        summarizer = _RecordingSummarizer(SummarizationConfig(context_size=1000))
+
+        summarizer.summarize(_transcript(3000), "Focus on the budget.")
+
+        assert len(summarizer.completions) > 2
+        # The merge step adds its own system text after the template's and the user's.
+        assert all("from the user:\nFocus on the budget." in system for system, _ in summarizer.completions)
+
+    def test_no_instructions_leave_the_template_alone(self):
+        summarizer = _RecordingSummarizer(SummarizationConfig(context_size=8192))
+
+        summarizer.summarize("SPEAKER_00: Short meeting.", "   ")
+
+        assert summarizer.completions[0][0] == resolve_template("meeting", {})[0]
+
+
 class TestSummarizeMapReduce:
     def test_long_transcript_maps_then_reduces(self):
         summarizer = _RecordingSummarizer(SummarizationConfig(context_size=1000))

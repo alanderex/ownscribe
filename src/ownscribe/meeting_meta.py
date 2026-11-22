@@ -41,6 +41,36 @@ def summary_is_stale(folder: Path, meta: dict[str, Any] | None = None) -> bool:
     return (read_meta(folder) if meta is None else meta).get("summary_stale") is True
 
 
+SUMMARY_REQUEST_KEY = "summary_request"
+_SUMMARY_REQUEST_FIELDS = ("backend", "model", "template", "instructions")
+
+
+def summary_request(folder: Path, meta: dict[str, Any]) -> dict[str, str] | None:
+    """What the current summary was written with (backend, model, template,
+    instructions), or None for a summary from before this was recorded."""
+    request = meta.get(SUMMARY_REQUEST_KEY)
+    if request is None:
+        return None
+    if not isinstance(request, dict) or not all(isinstance(request.get(f), str) for f in _SUMMARY_REQUEST_FIELDS):
+        raise click.ClickException(
+            f"{folder / META_NAME}: {SUMMARY_REQUEST_KEY} must hold text for {', '.join(_SUMMARY_REQUEST_FIELDS)}."
+        )
+    return {field: request[field] for field in _SUMMARY_REQUEST_FIELDS}
+
+
+def record_summary(folder: Path, *, backend: str, model: str, template: str, instructions: str) -> None:
+    """A summary was just written: keep what it was written with, and forget any
+    stale mark, since it reflects the transcript as it is now."""
+    request = {"backend": backend, "model": model, "template": template, "instructions": instructions}
+    update_meta(folder, summary_stale=None, **{SUMMARY_REQUEST_KEY: request})
+
+
+def forget_summary_request(folder: Path) -> None:
+    """The summary file was replaced by one this does not describe."""
+    if SUMMARY_REQUEST_KEY in read_meta(folder):
+        update_meta(folder, **{SUMMARY_REQUEST_KEY: None})
+
+
 def mark_summary_stale(folder: Path) -> None:
     update_meta(folder, summary_stale=True)
 

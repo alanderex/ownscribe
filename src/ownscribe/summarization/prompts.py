@@ -71,6 +71,19 @@ Transcript:
 {transcript}"""
 
 
+# Instructions typed for one summary ("focus on the budget", "write in German"). They
+# join the system prompt, which every chunk and the merge step of a long meeting
+# share, so they hold for the whole summary.
+USER_INSTRUCTIONS_SYSTEM = "Also follow these instructions from the user:\n{instructions}"
+
+
+def with_instructions(system_prompt: str, instructions: str) -> str:
+    """The system prompt with the user's instructions for this summary, if any."""
+    if not instructions.strip():
+        return system_prompt
+    return f"{system_prompt}\n\n{USER_INSTRUCTIONS_SYSTEM.format(instructions=instructions.strip())}"
+
+
 # --- Map-reduce over a transcript too long for one context window ---
 #
 # The reduce step runs under whatever template produced the partial notes, so it

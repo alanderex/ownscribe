@@ -19,7 +19,7 @@ import click
 from ownscribe.fileio import write_atomic
 from ownscribe.locks import folder_lock
 from ownscribe.meeting_files import SUMMARY_NAMES, TRANSCRIPT_NAMES, existing, original_of
-from ownscribe.meeting_meta import clear_summary_stale, mark_summary_stale
+from ownscribe.meeting_meta import clear_summary_stale, forget_summary_request, mark_summary_stale
 from ownscribe.output.json_output import dump_json
 from ownscribe.output.markdown import format_transcript
 from ownscribe.speakers import list_speakers_json, list_speakers_markdown, rename_json, rename_markdown
@@ -165,6 +165,8 @@ def revert_speaker_edits(folder: Path) -> list[Path]:
         for path in edited:
             os.replace(original_of(path), path)
         clear_summary_stale(folder)
+        if any(path.name in SUMMARY_NAMES for path in edited):
+            forget_summary_request(folder)
         return edited
 
 

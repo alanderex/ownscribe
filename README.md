@@ -197,6 +197,7 @@ ownscribe transcribe recording.wav # transcribe an audio or video file: wav/mp3/
 ownscribe summarize transcript.md  # summarize a transcript (saves alongside the input)
 ownscribe resume ./260220-1736    # resume a partial run, or process a folder's audio/video recording
 ownscribe resume ./260220-1736 --resummarize  # write the summary again (e.g. after moving speakers)
+ownscribe resume ./260220-1736 --resummarize --instructions "Focus on the budget" --template brief --summary-model <name>
 ownscribe ask "question"           # search your meetings with a natural-language question
 ownscribe show ./260220-1736 --json # describe a meeting folder as JSON: turns, speakers, status
 ownscribe show --list --json        # list every meeting folder as JSON: day, title, duration, tags, status

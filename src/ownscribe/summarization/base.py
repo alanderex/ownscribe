@@ -17,6 +17,7 @@ from ownscribe.summarization.prompts import (
     REDUCE_SUMMARY_SYSTEM,
     format_partials,
     resolve_template,
+    with_instructions,
 )
 
 if TYPE_CHECKING:
@@ -103,9 +104,14 @@ class Summarizer(abc.ABC):
 
     # -- summarization -------------------------------------------------------
 
-    def summarize(self, transcript_text: str) -> str:
-        """Summarize a transcript, splitting it up when it does not fit the window."""
+    def summarize(self, transcript_text: str, instructions: str = "") -> str:
+        """Summarize a transcript, splitting it up when it does not fit the window.
+
+        `instructions` are the user's own for this summary; they apply to every
+        chunk and to the merge step alike.
+        """
         system, prompt = resolve_template(self._config.template, self._templates)
+        system = with_instructions(system, instructions)
         text = transcript_text.strip()
         budget = self._input_budget(system, prompt)
 

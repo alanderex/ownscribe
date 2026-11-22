@@ -22,7 +22,7 @@ from typing import Protocol
 from ownscribe.config import Config
 from ownscribe.locks import probe
 from ownscribe.meeting_files import ORIGINAL_NAMES, TRANSCRIPT_NAMES, meeting_folders
-from ownscribe.meeting_meta import read_meta, summary_is_stale
+from ownscribe.meeting_meta import read_meta, summary_is_stale, summary_request
 from ownscribe.pipeline import _find_summary, find_meeting_audio
 from ownscribe.tags import LibraryTag, group_tags, in_library_spelling, meeting_tags, tags_listing
 from ownscribe.titles import stored_title
@@ -215,6 +215,8 @@ def meeting_detail(config: Config, directory: Path) -> dict:
         "standard_layout": transcript.standard_layout if transcript else None,
         # As the folder spells them: one meeting is shown without reading the library.
         "tags": meeting_tags(directory, meta),
+        # What the summary was written with, so it can be asked for again alike.
+        "summary_request": summary_request(directory, meta),
         "turns": [_turn_json(turn) for turn in turns],
         "speakers": speaker_stats(turns),
         "status": _status(config, directory, meta),

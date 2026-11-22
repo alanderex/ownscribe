@@ -152,6 +152,19 @@ class TestSpeakerStats:
 
 
 class TestMeetingDetail:
+    def test_reports_what_the_summary_was_written_with(self, config):
+        from ownscribe.meeting_meta import record_summary
+
+        folder = _folder(config)
+        assert meeting_detail(config, folder)["summary_request"] is None
+        record_summary(folder, backend="omlx", model="gemma", template="brief", instructions="In German.")
+        assert meeting_detail(config, folder)["summary_request"] == {
+            "backend": "omlx",
+            "model": "gemma",
+            "template": "brief",
+            "instructions": "In German.",
+        }
+
     def test_tags_as_the_folder_spells_them(self, config):
         folder = _folder(config)
         (folder / META_NAME).write_text(json.dumps({"schema": 1, "tags": ["clientx", "Q4"]}))

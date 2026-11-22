@@ -266,8 +266,10 @@ def summarize(ctx: click.Context, file: str, template: str | None) -> None:
 @click.option(
     "--resummarize",
     is_flag=True,
-    help="Write the summary again from the current transcript (after moving speakers); keeps the folder name.",
+    help="Write the summary (again) from the current transcript; keeps the folder name.",
 )
+@click.option("--instructions", default=None, help="Your own instructions for the summary (with --resummarize).")
+@click.option("--summary-model", default=None, help="Summarization model for this summary only (with --resummarize).")
 @click.pass_context
 def resume(
     ctx: click.Context,
@@ -276,8 +278,12 @@ def resume(
     language: str | None,
     template: str | None,
     resummarize: bool,
+    instructions: str | None,
+    summary_model: str | None,
 ) -> None:
     """Resume a partially-completed pipeline in a meeting directory."""
+    if not resummarize and (instructions is not None or summary_model is not None):
+        raise click.UsageError("--instructions and --summary-model apply only with --resummarize.")
     config = ctx.obj["config"]
     if model:
         config.transcription.model = model
@@ -285,10 +291,12 @@ def resume(
         config.transcription.language = language
     if template:
         config.summarization.template = template
+    if summary_model:
+        config.summarization.model = summary_model
 
     from ownscribe.pipeline import run_resume
 
-    run_resume(config, directory, resummarize=resummarize)
+    run_resume(config, directory, resummarize=resummarize, instructions=(instructions or "").strip())
 
 
 @cli.command()
