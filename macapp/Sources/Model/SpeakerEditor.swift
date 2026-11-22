@@ -16,8 +16,7 @@ final class SpeakerEditor {
         case failed(String)
     }
 
-    // edit-speakers' exit codes (src/ownscribe/locks.py, speaker_edits.py).
-    private static let busyExit: Int32 = 75
+    // edit-speakers' exit code for a changed transcript (src/ownscribe/speaker_edits.py).
     private static let transcriptChangedExit: Int32 = 65
 
     /// Drafts with edits in them, by meeting folder path.
@@ -59,7 +58,7 @@ final class SpeakerEditor {
         let message = FailureText.firstMeaningfulLine(result.stderr)
             ?? "Saving the speakers failed (exit \(result.exitCode))."
         switch result.exitCode {
-        case Self.busyExit: return .busy(message)
+        case OwnscribeCLI.busyExitCode: return .busy(message)
         case Self.transcriptChangedExit: return .transcriptChanged
         default: return .failed(message)
         }

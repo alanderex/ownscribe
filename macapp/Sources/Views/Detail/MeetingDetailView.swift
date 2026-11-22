@@ -35,10 +35,16 @@ struct MeetingDetailView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    MeetingHeader(
-                        row: row, language: document?.language,
-                        day: library.calendar.day(of: row), time: library.calendar.time(of: row)
-                    )
+                    VStack(alignment: .leading, spacing: 10) {
+                        MeetingHeader(
+                            row: row, language: document?.language,
+                            day: library.calendar.day(of: row), time: library.calendar.time(of: row)
+                        )
+                        // An older CLI has no tags.
+                        if !engine.isDegraded {
+                            MeetingTagsView(row: row, readOnlyReason: isProcessing ? Library.tagsBusyMessage : nil)
+                        }
+                    }
                     tabBar
                     Divider()
                     switch tab {
@@ -103,10 +109,16 @@ struct MeetingDetailView: View {
         return readOnlyReason == nil
     }
 
-    /// Why the speakers cannot be edited now. A folder whose lock state is unknown (a
-    /// volume without lock support) stays editable.
+    /// A process works on the meeting's folder: one of the app's jobs, or another
+    /// process holding its lock. A folder whose lock state is unknown (a volume without
+    /// lock support) does not count, so it stays editable.
+    private var isProcessing: Bool {
+        row.status.busy == .busy || jobs.ownedFolder == row.path
+    }
+
+    /// Why the speakers cannot be edited now.
     private var readOnlyReason: String? {
-        if row.status.busy == .busy || jobs.ownedFolder == row.path {
+        if isProcessing {
             return "Processing… Speakers can be edited when this meeting is done."
         }
         if document?.revision == nil {

@@ -134,6 +134,22 @@ final class Library {
         unseen.remove(path)
     }
 
+    /// What a meeting's tags show while a process works on its folder.
+    static let tagsBusyMessage = "Processing… Tags can be changed when this meeting is done."
+
+    /// Adds and removes a meeting's tags with `ownscribe tag`, then lists the library
+    /// again so its rows and tag counts follow. Returns why it failed, or nil.
+    func editTags(of row: LibraryRow, add: [String], remove: [String]) async -> String? {
+        let result = await engine.cli.tag(row.url, add: add, remove: remove)
+        guard result.ok else {
+            if result.exitCode == OwnscribeCLI.busyExitCode { return Self.tagsBusyMessage }
+            return FailureText.firstMeaningfulLine(result.stderr)
+                ?? "Changing the tags failed (exit \(result.exitCode))."
+        }
+        refresh()
+        return nil
+    }
+
     /// Names given to speakers anywhere in the library, offered when naming speakers.
     var knownSpeakerNames: [String] { LibraryRow.speakerNames(in: rows) }
 

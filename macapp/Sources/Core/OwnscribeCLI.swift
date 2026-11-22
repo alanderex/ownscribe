@@ -91,6 +91,10 @@ final class OwnscribeCLI {
     /// build ignores it, so a stray key can never change what users run.
     static let cliSpecOverrideKey = "OWNSCRIBE_CLI_SPEC"
 
+    /// The exit code of a command refused because another process works on the
+    /// meeting folder (EX_TEMPFAIL, src/ownscribe/locks.py).
+    static let busyExitCode: Int32 = 75
+
     /// What install() installs and the stamp must match: the override in a variant
     /// build that sets one, the release tag otherwise. Removing the key therefore
     /// triggers a normal upgrade back to the tag.
@@ -228,5 +232,10 @@ final class OwnscribeCLI {
     /// Saves speaker edits: renames, merges and line moves, as one SpeakerDraft's arguments.
     func editSpeakers(_ folder: URL, arguments: [String]) async -> CommandResult {
         await run(["edit-speakers", folder.path] + arguments)
+    }
+
+    /// Adds and removes a meeting's tags (`ownscribe tag`).
+    func tag(_ folder: URL, add: [String], remove: [String]) async -> CommandResult {
+        await run(["tag", folder.path] + add.flatMap { ["--add", $0] } + remove.flatMap { ["--remove", $0] })
     }
 }
