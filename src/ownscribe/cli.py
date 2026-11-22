@@ -480,6 +480,28 @@ def tag_cmd(ctx: click.Context, directory: str, adds: tuple[str, ...], removes: 
     click.echo(f"Tags of {folder.name}: {', '.join(tags) if tags else '(none)'}")
 
 
+@cli.command("tags")
+@click.option("--json", "as_json", is_flag=True, help="Print every tag with its number of meetings, as JSON.")
+@click.option("--delete", "delete", default=None, metavar="TAG", help="Remove TAG from every meeting.")
+@click.pass_context
+def tags_cmd(ctx: click.Context, as_json: bool, delete: str | None) -> None:
+    """List the library's tags (--json), or remove one from every meeting (--delete)."""
+    import json
+
+    from ownscribe.tags import TAGS_SCHEMA, delete_tag, library_tags, tags_listing
+
+    config = ctx.obj["config"]
+    if delete is not None:
+        if as_json:
+            raise click.UsageError("Pass --json or --delete, not both.")
+        deleted = delete_tag(config, delete)
+        click.echo(f"Removed '{deleted.name}' from {deleted.count} meeting{'' if deleted.count == 1 else 's'}.")
+        return
+    if not as_json:
+        raise click.UsageError("tags prints JSON only; pass --json (or --delete TAG).")
+    click.echo(json.dumps({"schema": TAGS_SCHEMA, "tags": tags_listing(library_tags(config))}, ensure_ascii=False))
+
+
 def _parse_assignments(pairs: tuple[str, ...]) -> dict[int, str]:
     """Parse `INDEX=Name` pairs; a line given twice is an error, not a last-one-wins."""
     moves: dict[int, str] = {}

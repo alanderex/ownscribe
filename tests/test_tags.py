@@ -12,9 +12,9 @@ from click.testing import CliRunner
 
 from ownscribe.cli import cli
 from ownscribe.config import Config
-from ownscribe.locks import FolderBusyError
+from ownscribe.locks import FolderBusyError, LockState
 from ownscribe.meeting_meta import META_NAME, mark_summary_stale, read_meta, summary_is_stale
-from ownscribe.tags import check_tag, edit_tags, group_tags, library_tags, meeting_tags
+from ownscribe.tags import TagBusyError, check_tag, delete_tag, edit_tags, group_tags, library_tags, meeting_tags
 
 
 @pytest.fixture
@@ -33,8 +33,17 @@ def _folder(config: Config, name: str) -> Path:
 
 
 def _tag(config: Config, *args: str):
+    return _invoke(config, "tag", *args)
+
+
+def _invoke(config: Config, *args: str):
     with mock.patch("ownscribe.cli.Config.load", return_value=config):
-        return CliRunner().invoke(cli, ["tag", *args])
+        return CliRunner().invoke(cli, list(args))
+
+
+def _write_tags(folder: Path, tags: list[str]) -> None:
+    """Tags as a hand edit or an older run might have left them."""
+    (folder / META_NAME).write_text(json.dumps({"schema": 1, "tags": tags}))
 
 
 class TestCheckTag:
@@ -147,3 +156,64 @@ class TestTagCommand:
         with hold_folder_lock(folder):
             result = _tag(library, str(folder), "--add", "ClientX")
         assert result.exit_code == 75
+
+
+class TestTagsListing:
+    def test_lists_every_tag_with_its_count_by_name(self, library):
+        edit_tags(library, _folder(library, "260101-kickoff"), add=["q4", "ClientX"], remove=[])
+        edit_tags(library, _folder(library, "260102-sync"), add=["clientx"], remove=[])
+        result = _invoke(library, "tags", "--json")
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output) == {
+            "schema": 1,
+            "tags": [{"name": "ClientX", "count": 2}, {"name": "q4", "count": 1}],
+        }
+
+    def test_needs_json_or_delete_and_not_both(self, library):
+        assert _invoke(library, "tags").exit_code == 2
+        assert _invoke(library, "tags", "--json", "--delete", "Q4").exit_code == 2
+
+
+class TestDeleteTag:
+    def test_removes_the_tag_from_every_meeting_in_any_spelling(self, library):
+        _write_tags(_folder(library, "260101-kickoff"), ["ClientX", "Q4"])
+        _write_tags(_folder(library, "260102-sync"), ["clientx"])
+        result = _invoke(library, "tags", "--delete", "CLIENTX")
+        assert result.exit_code == 0, result.output
+        assert result.output == "Removed 'ClientX' from 2 meetings.\n"
+        assert meeting_tags(_folder(library, "260101-kickoff")) == ["Q4"]
+        assert "tags" not in read_meta(_folder(library, "260102-sync"))
+
+    def test_a_tag_no_meeting_has_is_an_error(self, library):
+        result = _invoke(library, "tags", "--delete", "Nope")
+        assert result.exit_code == 1
+        assert "No meeting has the tag 'Nope'" in result.output
+
+    def test_a_busy_meeting_with_the_tag_stops_it_before_any_change(self, library, hold_folder_lock):
+        for name in ("260101-kickoff", "260102-sync", "260103-review"):
+            _write_tags(_folder(library, name), ["ClientX"])
+        untouched = ("260101-kickoff", "260103-review")
+        before = {name: (_folder(library, name) / META_NAME).read_bytes() for name in untouched}
+        with hold_folder_lock(_folder(library, "260102-sync")):
+            result = _invoke(library, "tags", "--delete", "ClientX")
+        assert result.exit_code == 75
+        assert "Nothing changed: 1 meeting with 'ClientX' is busy now" in result.output
+        assert str(_folder(library, "260102-sync")) in result.output
+        assert {name: (_folder(library, name) / META_NAME).read_bytes() for name in before} == before
+
+    def test_a_meeting_that_becomes_busy_stops_it_and_is_named(self, library, hold_folder_lock):
+        for name in ("260101-kickoff", "260102-sync", "260103-review"):
+            _write_tags(_folder(library, name), ["ClientX"])
+        # The folder is taken between the check and its turn.
+        with (
+            hold_folder_lock(_folder(library, "260102-sync")),
+            mock.patch("ownscribe.tags.probe", return_value=LockState(busy=False)),
+            pytest.raises(TagBusyError) as stopped,
+        ):
+            delete_tag(library, "ClientX")
+        message = stopped.value.message
+        assert message.startswith("Removed 'ClientX' from 1 meeting; these became busy and still have it:")
+        assert str(_folder(library, "260102-sync")) in message
+        assert str(_folder(library, "260103-review")) in message
+        assert meeting_tags(_folder(library, "260101-kickoff")) == []
+        assert meeting_tags(_folder(library, "260103-review")) == ["ClientX"]

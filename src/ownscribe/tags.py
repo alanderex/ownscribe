@@ -8,18 +8,27 @@ folder, by name, that has it. So "clientx" typed on a new meeting joins an exist
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 import click
 
 from ownscribe.config import Config
-from ownscribe.locks import folder_lock
+from ownscribe.locks import BUSY_EXIT_CODE, FolderBusyError, folder_lock, probe
 from ownscribe.meeting_files import meeting_folders
 from ownscribe.meeting_meta import META_NAME, read_meta, update_meta
 
 TAGS_KEY = "tags"
+
+#: Schema of `tags --json`; bumped when a field changes meaning or disappears.
+TAGS_SCHEMA = 1
+
+
+class TagBusyError(click.ClickException):
+    """Meetings with the tag were busy, so it was not removed from them; exits 75."""
+
+    exit_code = BUSY_EXIT_CODE
 
 
 @dataclass(frozen=True)
@@ -102,3 +111,53 @@ def edit_tags(config: Config, folder: Path, *, add: Sequence[str], remove: Seque
         if tags != current:
             update_meta(folder, **{TAGS_KEY: tags or None})
     return tags
+
+
+def tags_listing(library: Mapping[str, LibraryTag]) -> list[dict]:
+    """Each tag's name and meeting count, by name: what `tags --json` and
+    `show --list` report."""
+    return [{"name": tag.name, "count": tag.count} for tag in sorted(library.values(), key=lambda t: t.name.casefold())]
+
+
+def delete_tag(config: Config, text: str) -> LibraryTag:
+    """Remove a tag, in any spelling, from every meeting; returns it as it was.
+
+    When a meeting with the tag is busy, nothing is changed: a tag deleted from
+    some meetings only would come back in the list. A folder that becomes busy
+    after that check stops the deletion there, and the error says which meetings
+    still have the tag.
+    """
+    tag = check_tag(text)
+    key = tag.casefold()
+    found = library_tags(config).get(key)
+    if found is None:
+        raise click.ClickException(f"No meeting has the tag '{tag}'.")
+    if busy := [folder for folder in found.folders if probe(folder).busy is True]:
+        raise TagBusyError(
+            f"Nothing changed: {_meetings(len(busy))} with '{found.name}' "
+            f"{'is' if len(busy) == 1 else 'are'} busy now:\n{_lines(busy)}\nTry again once they have finished."
+        )
+    changed: list[Path] = []
+    for folder in found.folders:
+        try:
+            with folder_lock(folder, "tag"):
+                tags = meeting_tags(folder)
+                kept = [kept for kept in tags if kept.casefold() != key]
+                if kept != tags:
+                    update_meta(folder, **{TAGS_KEY: kept or None})
+        except FolderBusyError:
+            left = found.folders[len(changed) :]
+            raise TagBusyError(
+                f"Removed '{found.name}' from {_meetings(len(changed))}; these became busy and still have it:\n"
+                f"{_lines(left)}\nRun the command again once they have finished."
+            ) from None
+        changed.append(folder)
+    return found
+
+
+def _meetings(count: int) -> str:
+    return "1 meeting" if count == 1 else f"{count} meetings"
+
+
+def _lines(folders: Iterable[Path]) -> str:
+    return "\n".join(f"  {folder}" for folder in folders)

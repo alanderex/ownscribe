@@ -206,6 +206,8 @@ ownscribe edit-speakers ./260220-1736 --map SPEAKER_00=Anna  # rename or merge s
 ownscribe edit-speakers ./260220-1736 --revert              # undo every speaker edit in that folder
 ownscribe edit-speakers ./260220-1736 --assign 42=Anna --revision <rev>  # move one transcript line to Anna
 ownscribe tag ./260220-1736 --add ClientX --remove Draft  # tag a meeting (an existing tag's spelling is kept)
+ownscribe tags --json               # every tag with its number of meetings (JSON)
+ownscribe tags --delete ClientX     # remove a tag from every meeting
 ownscribe config                   # open config file in $EDITOR
 ownscribe config get               # print effective config as JSON
 ownscribe config set summarization.backend openai           # set a value (keeps comments)
