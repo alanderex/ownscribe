@@ -137,5 +137,6 @@ extension View {
             .environment(model.jobs)
             .environment(model.library)
             .environment(model.windows)
+            .environment(model.speakerEditor)
     }
 }

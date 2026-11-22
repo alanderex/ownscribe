@@ -11,6 +11,8 @@ struct MeetingDetailView: View {
 
     @Environment(Engine.self) private var engine
     @Environment(Library.self) private var library
+    @Environment(Jobs.self) private var jobs
+    @Environment(SpeakerEditor.self) private var editor
     let row: LibraryRow
 
     @State private var summary: String?
@@ -21,6 +23,9 @@ struct MeetingDetailView: View {
     @State private var chosenTab: Tab?
     @State private var namingSkipped: Set<String> = []
     @State private var player = TurnPlayer()
+    /// Lines waiting for a name typed for "New Speaker…".
+    @State private var newSpeakerLines: [Int]?
+    @State private var newSpeakerName = ""
 
     var body: some View {
         ScrollView {
@@ -46,6 +51,32 @@ struct MeetingDetailView: View {
             await load()
         }
         .onDisappear { player.stop() }
+        .alert("New Speaker", isPresented: newSpeakerPrompt) {
+            TextField("Name", text: $newSpeakerName)
+            Button("Move") { moveToTypedSpeaker() }
+            Button("Cancel", role: .cancel) { newSpeakerLines = nil }
+        } message: {
+            Text("The lines move to this speaker when the speaker edits are saved.")
+        }
+    }
+
+    /// Whether speakers can be edited: never while a job works on the folder, and only
+    /// with a CLI that numbers the transcript's lines.
+    private var canEdit: Bool {
+        guard let document, document.revision != nil, !engine.isDegraded else { return false }
+        return row.status.busy != .busy && jobs.ownedFolder != row.path
+    }
+
+    private var newSpeakerPrompt: Binding<Bool> {
+        Binding(get: { newSpeakerLines != nil }, set: { if !$0 { newSpeakerLines = nil } })
+    }
+
+    private func moveToTypedSpeaker() {
+        defer { newSpeakerLines = nil }
+        guard let lines = newSpeakerLines, let document else { return }
+        let target = editor.draft(for: row.path, document: document).target(forTypedName: newSpeakerName)
+        guard !target.isEmpty else { return }
+        editor.update(row.path, document: document) { $0.move(lines: lines, to: target) }
     }
 
     /// The CLI's word on the recording: the fresh document's when loaded.
@@ -79,7 +110,7 @@ struct MeetingDetailView: View {
             .labelsHidden()
             .fixedSize()
             Spacer()
-            if tab == .transcript, player.playingTurn != nil {
+            if tab == .transcript, player.playingLine != nil {
                 Button {
                     player.stop()
                 } label: {
@@ -134,7 +165,19 @@ struct MeetingDetailView: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
-                TranscriptView(document: document, playingTurn: player.playingTurn, play: playAction)
+                TranscriptView(
+                    document: document,
+                    draft: editor.draft(for: row.path, document: document),
+                    playingLine: player.playingLine,
+                    play: playAction,
+                    move: canEdit ? { lines, target in
+                        editor.update(row.path, document: document) { $0.move(lines: lines, to: target) }
+                    } : nil,
+                    moveToNewSpeaker: canEdit ? { lines in
+                        newSpeakerName = ""
+                        newSpeakerLines = lines
+                    } : nil
+                )
             }
         } else if let documentFailure {
             Label(documentFailure, systemImage: "exclamationmark.triangle")
@@ -144,10 +187,10 @@ struct MeetingDetailView: View {
         }
     }
 
-    /// nil when the recording cannot be played, so turns offer no playback at all.
-    private var playAction: ((MeetingDocument.Turn) -> Void)? {
+    /// nil when the recording cannot be played, so lines offer no playback at all.
+    private var playAction: ((MeetingDocument.Segment) -> Void)? {
         guard let url = playback.url else { return nil }
-        return { turn in player.play(url, from: turn.start, turn: turn.ordinal) }
+        return { segment in player.play(url, from: segment.start, line: segment.index) }
     }
 
     private func load() async {
