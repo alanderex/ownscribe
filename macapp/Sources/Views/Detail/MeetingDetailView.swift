@@ -51,6 +51,7 @@ struct MeetingDetailView: View {
                     }
                 }
                 tabBar
+                summaryFailure
             }
             .readingMeasure()
             .padding(.horizontal, 28)
@@ -328,6 +329,30 @@ struct MeetingDetailView: View {
                       ? "Available when the current recording or job is done."
                       : "Write the summary with your own instructions, template and model")
             }
+        }
+    }
+
+    /// Why the summary run on this meeting failed, in the pinned area so it shows on
+    /// either tab, until dismissed or another run starts.
+    @ViewBuilder
+    private var summaryFailure: some View {
+        if case .failed(let message) = jobs.state, jobs.failedFolder == row.path {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("The summary could not be written", systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Text(message)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Summarize…") { showsSummarize = true }
+                    Button("Dismiss", action: jobs.dismissFailure)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 
