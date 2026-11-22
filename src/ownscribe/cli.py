@@ -410,6 +410,38 @@ def rename_speakers_cmd(transcript: str, maps: tuple[str, ...]) -> None:
     click.echo(f"Renamed {renamed} speaker(s) in {transcript}")
 
 
+@cli.command("edit-speakers")
+@click.argument("directory", type=click.Path(exists=True, file_okay=False))
+@click.option(
+    "--map",
+    "maps",
+    multiple=True,
+    metavar="LABEL=Name",
+    help="Rename a speaker, e.g. --map SPEAKER_00=Anna; labels mapped to one name merge (repeatable).",
+)
+@click.option("--revert", is_flag=True, help="Put the transcript and summary back as they were before the first edit.")
+def edit_speakers_cmd(directory: str, maps: tuple[str, ...], revert: bool) -> None:
+    """Rename or merge speakers in a meeting's transcript and summary."""
+    from pathlib import Path
+
+    from ownscribe.speaker_edits import rename_speakers, revert_speaker_edits
+
+    folder = Path(directory).resolve()
+    if revert:
+        if maps:
+            raise click.UsageError("--revert cannot be combined with --map.")
+        restored = revert_speaker_edits(folder)
+        click.echo(f"Restored {', '.join(path.name for path in restored)} in {folder}")
+        return
+    if not maps:
+        raise click.UsageError("Nothing to do: pass --map LABEL=Name (repeatable) or --revert.")
+    changed = rename_speakers(folder, _parse_speaker_map(maps))
+    if changed:
+        click.echo(f"Updated {', '.join(path.name for path in changed)} in {folder}")
+    else:
+        click.echo(f"Nothing changed in {folder}")
+
+
 @cli.command()
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts.")
 @click.option("--all", "all_", is_flag=True, help="Remove everything (config + cache + output).")

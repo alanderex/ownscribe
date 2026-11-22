@@ -1,9 +1,11 @@
 """List and rename diarized speaker labels in saved transcripts.
 
 Diarization emits anonymous labels (``SPEAKER_00``, ``SPEAKER_01``, …) that are
-not stable across meetings, so naming happens per meeting after the fact. The
-summarizer never sees these labels (it summarizes plain segment text), so
-renaming is a pure rewrite of the transcript file — no re-summarization needed.
+not stable across meetings, so naming happens per meeting after the fact.
+
+These functions rewrite one transcript file. The summarizer is fed text that
+carries the labels, so a summary names them too; ``speaker_edits`` renames across
+transcript and summary together (``ownscribe edit-speakers``).
 
 Works on both output formats: markdown (the default) and JSON.
 """

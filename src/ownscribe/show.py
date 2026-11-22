@@ -19,6 +19,7 @@ from pathlib import Path
 
 from ownscribe.config import Config
 from ownscribe.locks import probe
+from ownscribe.meeting_files import ORIGINAL_NAMES, TRANSCRIPT_NAMES
 from ownscribe.output.json_output import parse_transcript_json
 from ownscribe.output.markdown import parse_transcript
 from ownscribe.pipeline import _find_summary, find_meeting_audio
@@ -26,12 +27,6 @@ from ownscribe.transcription.models import Segment, TranscriptResult
 
 #: Bumped when a field changes meaning or disappears; new fields do not bump it.
 SCHEMA_VERSION = 1
-
-# transcript.json carries real segment end times, so it wins when both exist.
-_TRANSCRIPT_NAMES = ("transcript.json", "transcript.md")
-
-# The one-time copies `edit-speakers` keeps before it first renames speakers.
-_ORIGINAL_NAMES = ("transcript.json.orig", "transcript.md.orig", "summary.json.orig", "summary.md.orig")
 
 # Folder names start with the meeting's day: `YYMMDD-…` from this version, and
 # `YYYY-MM-DD` followed by `_` or `-` from older versions and hand-named folders.
@@ -241,7 +236,7 @@ def _created(folder: Path) -> str | None:
 
 def _read_transcript(directory: Path) -> TranscriptResult | None:
     """The folder's transcript, or None when there is none or it cannot be read back."""
-    for name in _TRANSCRIPT_NAMES:
+    for name in TRANSCRIPT_NAMES:
         path = directory / name
         if path.is_file():
             text = path.read_text()
@@ -263,7 +258,7 @@ def _status(config: Config, directory: Path) -> dict:
     `busy` is true, false, or "unknown" on a volume where locks cannot be read;
     `holder_pid` names the process holding the folder's lock.
     """
-    has_transcript = any((directory / name).is_file() for name in _TRANSCRIPT_NAMES)
+    has_transcript = any((directory / name).is_file() for name in TRANSCRIPT_NAMES)
     if _find_summary(directory) is not None:
         summary = "present"
     elif config.summarization.enabled:
@@ -276,7 +271,7 @@ def _status(config: Config, directory: Path) -> dict:
         "transcript": "present" if has_transcript else "missing",
         "summary": summary,
         "audio": str(audio) if audio else None,
-        "orig": any((directory / name).is_file() for name in _ORIGINAL_NAMES),
+        "orig": any((directory / name).is_file() for name in ORIGINAL_NAMES),
         "busy": lock.busy,
         "holder_pid": lock.holder_pid,
     }

@@ -200,6 +200,8 @@ ownscribe show ./260220-1736 --json # describe a meeting folder as JSON: turns, 
 ownscribe show --list --json        # list every meeting folder as JSON: day, title, duration, status
 ownscribe list-speakers transcript.md                       # list diarized speaker labels (JSON)
 ownscribe rename-speakers transcript.md --map SPEAKER_00=Anna # name speakers in a transcript
+ownscribe edit-speakers ./260220-1736 --map SPEAKER_00=Anna  # rename or merge speakers in transcript + summary
+ownscribe edit-speakers ./260220-1736 --revert              # undo every speaker edit in that folder
 ownscribe config                   # open config file in $EDITOR
 ownscribe config get               # print effective config as JSON
 ownscribe config set summarization.backend openai           # set a value (keeps comments)
@@ -327,7 +329,18 @@ If you already know how many people are on the call, pass `--speakers N` (sets b
 
 ### Naming speakers
 
-Diarization produces anonymous labels (`SPEAKER_00`, `SPEAKER_01`, …) that aren't stable across meetings, so names are applied per transcript after the fact. Summaries don't reference speaker labels, so renaming only rewrites the transcript — no re-summarization needed:
+Diarization produces anonymous labels (`SPEAKER_00`, `SPEAKER_01`, …) that aren't stable across meetings, so names are applied per meeting after the fact. The summary is written from text that carries those labels, so `edit-speakers` renames them in the transcript and the summary together:
+
+```bash
+ownscribe edit-speakers ./260220-1736 \
+    --map SPEAKER_00=Anna --map SPEAKER_01=Bob                 # name speakers in transcript + summary
+ownscribe edit-speakers ./260220-1736 --map Bob=Anna          # two labels for one person: merge them
+ownscribe edit-speakers ./260220-1736 --revert                # back to the files before the first edit
+```
+
+The transcript changes only in its speaker labels, never in what was said. Before the first edit ownscribe keeps a copy of each changed file (`transcript.md.orig`, `summary.md.orig`), which `--revert` puts back. A folder another ownscribe process is working on is refused with exit code 75.
+
+`list-speakers` and `rename-speakers` work on a single transcript file and leave the summary alone:
 
 ```bash
 ownscribe list-speakers transcript.md                         # ["SPEAKER_00", "SPEAKER_01"]
