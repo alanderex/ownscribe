@@ -51,4 +51,18 @@ final class FailureTextTests: XCTestCase {
         )
         XCTAssertNil(FailureText.wholeMessage("  \n"))
     }
+
+    func testTheErrorLineWinsOverProgressLines() {
+        let stderr = """
+            Warning: unknown config key transcription.backend — ignored.
+            Found transcript: /Users/a/ownscribe/261121-1753/transcript.md
+            Writing the summary again.
+
+            Error: oMLX is not reachable at http://127.0.0.1:8000/v1. Is it running?
+            """
+        XCTAssertEqual(
+            FailureText.firstMeaningfulLine(stderr),
+            "Error: oMLX is not reachable at http://127.0.0.1:8000/v1. Is it running?"
+        )
+    }
 }

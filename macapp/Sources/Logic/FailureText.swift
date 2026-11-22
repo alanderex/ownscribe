@@ -18,6 +18,11 @@ enum FailureText {
             // The exception type and message are on the final line of a traceback.
             return lines.last
         }
+        // The CLI says what went wrong on an "Error:" line, often after lines that
+        // report progress ("Found transcript: …"), which explain nothing.
+        if let error = lines.first(where: { $0.hasPrefix("Error:") }) {
+            return error
+        }
         // A torch/pyannote import prints deprecation warnings long before anything
         // fails, so "first line" was usually library noise rather than the error.
         // Prefer the first line that isn't recognisable noise; fall back to the
