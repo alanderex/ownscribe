@@ -62,8 +62,8 @@ def ask(config: Config, question: str, since: str | None, limit: int | None) -> 
         click.echo(f"Error: {exc}", err=True)
         return
     with summarizer:
-        if not summarizer.is_available():
-            click.echo("Summarization backend is not reachable. Check your configuration.")
+        if problem := summarizer.problem():
+            click.echo(problem)
             return
 
         context_size = summarizer.context_size

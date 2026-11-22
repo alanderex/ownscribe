@@ -26,6 +26,8 @@ class OpenAISummarizer(Summarizer):
         base_url = config.resolved_host
         if not base_url.endswith("/v1"):
             base_url = base_url.rstrip("/") + "/v1"
+        self._base_url = base_url
+        self._label = "oMLX" if config.backend == "omlx" else "The OpenAI-compatible server"
         # Most local servers ignore the key; servers that require auth (e.g. oMLX)
         # read it from config.api_key or the OPENAI_API_KEY env var.
         api_key = config.api_key or "not-needed"
@@ -68,12 +70,19 @@ class OpenAISummarizer(Summarizer):
                 continue
         return ""
 
-    def is_available(self) -> bool:
+    def problem(self) -> str | None:
         try:
             self._client.models.list()
-            return True
-        except Exception:
-            return False
+        except openai.AuthenticationError:
+            return f"{self._label} refused the API key (summarization.api_key or OPENAI_API_KEY)."
+        except openai.APIConnectionError:
+            return f"{self._label} is not reachable at {self._base_url}. Is it running?"
+        except openai.APIError as exc:
+            return f"{self._label} at {self._base_url} answered with an error: {exc}"
+        return None
+
+    def is_available(self) -> bool:
+        return self.problem() is None
 
     def _complete(self, system_prompt: str, user_prompt: str) -> str:
         response = self._client.chat.completions.create(

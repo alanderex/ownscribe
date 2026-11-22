@@ -574,18 +574,8 @@ def run_summarize(config: Config, transcript_file: str, *, in_place: bool = Fals
     except ImportError as exc:
         click.echo(f"Error: {exc}", err=True)
         raise SystemExit(1) from None
-    if not summarizer.is_available():
-        if config.summarization.backend == "local":
-            click.echo(
-                f"Error: Local summarization model '{config.summarization.model}' is not available.",
-                err=True,
-            )
-        else:
-            click.echo(
-                f"Error: {config.summarization.backend} is not reachable at {config.summarization.resolved_host}. "
-                "Is the server running?",
-                err=True,
-            )
+    if problem := summarizer.problem():
+        click.echo(f"Error: {problem}", err=True)
         raise SystemExit(1)
 
     from ownscribe.output.markdown import format_summary
@@ -682,7 +672,8 @@ def _do_transcribe_and_summarize(
     summary = None
     summary_str = None
     title_slug = ""
-    sum_unavailable = False
+    #: Why the summarizer could not run; the transcript is kept either way.
+    sum_unavailable: str | None = None
     sum_failed = False
 
     local_sum = sum_enabled and config.summarization.backend == "local"
@@ -716,9 +707,8 @@ def _do_transcribe_and_summarize(
                 click.echo(f"Error: {exc}", err=True)
                 raise SystemExit(1) from None
             try:
-                if not summarizer.is_available():
-                    sum_unavailable = True
-                else:
+                sum_unavailable = summarizer.problem()
+                if not sum_unavailable:
                     try:
                         progress.begin("summarizing")
                         if local_sum:
@@ -746,19 +736,7 @@ def _do_transcribe_and_summarize(
     click.echo(f"Transcript saved to {transcript_path}")
 
     if sum_unavailable:
-        if config.summarization.backend == "local":
-            click.echo(
-                f"\nWarning: Local summarization model '{config.summarization.model}' is not available. "
-                "Skipping summarization.",
-                err=True,
-            )
-        else:
-            click.echo(
-                f"\nWarning: {config.summarization.backend} is not reachable "
-                f"at {config.summarization.resolved_host}. "
-                "Skipping summarization. Is the server running?",
-                err=True,
-            )
+        click.echo(f"\nWarning: {sum_unavailable} Skipping summarization.", err=True)
     elif sum_failed:
         click.echo(
             f"\nWarning: Summarization failed. "

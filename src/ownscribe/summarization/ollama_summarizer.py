@@ -21,7 +21,8 @@ class OllamaSummarizer(Summarizer):
     def __init__(self, config: SummarizationConfig, templates: dict | None = None) -> None:
         super().__init__(config, templates)
         # Without a timeout a wedged server hangs summarize and ask forever.
-        self._client = ollama.Client(host=config.resolved_host, timeout=_HTTP_TIMEOUT)
+        self._host = config.resolved_host
+        self._client = ollama.Client(host=self._host, timeout=_HTTP_TIMEOUT)
         self._probed_context_size: int | None = None
 
     @property
@@ -64,12 +65,15 @@ class OllamaSummarizer(Summarizer):
         )
         return clean_response(response["message"]["content"])
 
-    def is_available(self) -> bool:
+    def problem(self) -> str | None:
         try:
             self._client.list()
-            return True
         except Exception:
-            return False
+            return f"Ollama is not reachable at {self._host}. Is it running?"
+        return None
+
+    def is_available(self) -> bool:
+        return self.problem() is None
 
     def _complete(self, system_prompt: str, user_prompt: str) -> str:
         response = self._client.chat(

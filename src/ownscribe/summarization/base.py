@@ -174,6 +174,15 @@ class Summarizer(abc.ABC):
     def is_available(self) -> bool:
         """Check if the summarization backend is reachable."""
 
+    def problem(self) -> str | None:
+        """Why this summarizer cannot run now, or None when it can.
+
+        Callers print it instead of guessing: "not reachable" was printed for a
+        refused API key and a local model name that is not a GGUF alike. Backends
+        that can tell their failures apart override it.
+        """
+        return None if self.is_available() else "The summarization backend is not available."
+
     def close(self) -> None:  # noqa: B027 — intentional optional hook, not abstract
         """Release any native resources. No-op by default; must be idempotent."""
 

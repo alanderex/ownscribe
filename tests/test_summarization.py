@@ -337,6 +337,7 @@ class TestOllamaSummarizer:
 
         summarizer = OllamaSummarizer(config)
         assert summarizer.is_available() is False
+        assert summarizer.problem() == "Ollama is not reachable at http://localhost:1. Is it running?"
 
 
 class TestOpenAIGenerateTitle:
@@ -444,6 +445,35 @@ class TestOpenAISummarizer:
 
         summarizer = OpenAISummarizer(config)
         assert summarizer.is_available() is False
+
+    def test_problem_names_an_unreachable_server(self):
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        config = SummarizationConfig(host="http://localhost:1", backend="omlx", model="m")
+        assert OpenAISummarizer(config).problem() == "oMLX is not reachable at http://localhost:1/v1. Is it running?"
+
+    def test_problem_names_a_refused_api_key(self, httpserver):
+        httpserver.expect_request("/v1/models", method="GET").respond_with_json(
+            {"error": {"message": "Invalid API key"}}, status=401
+        )
+        config = SummarizationConfig(host=httpserver.url_for(""), backend="omlx", model="m", api_key="wrong")
+
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        summarizer = OpenAISummarizer(config)
+        assert summarizer.problem() == "oMLX refused the API key (summarization.api_key or OPENAI_API_KEY)."
+        assert summarizer.is_available() is False
+
+    def test_problem_reports_a_server_error(self, httpserver):
+        httpserver.expect_request("/v1/models", method="GET").respond_with_json({"error": "boom"}, status=500)
+        config = SummarizationConfig(host=httpserver.url_for(""), backend="openai", model="m")
+
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        problem = OpenAISummarizer(config).problem()
+        assert problem is not None
+        assert problem.startswith("The OpenAI-compatible server at ")
+        assert "answered with an error" in problem
 
     def test_summarize_cleans_think_tags(self, httpserver):
         response_body = {
@@ -557,6 +587,19 @@ class TestLlamaCppSummarizer:
         summarizer = LlamaCppSummarizer(config)
         with patch.dict("sys.modules", {"llama_cpp": None}):
             assert summarizer.is_available() is False
+
+    def test_an_mlx_model_name_points_to_omlx(self, mock_llama):
+        # A model name oMLX serves is not something llama.cpp can load.
+        config = SummarizationConfig(backend="local", model="mlx-community--gemma-4-26B-A4B-it-qat-4bit")
+
+        from ownscribe.summarization.llama_cpp_summarizer import LlamaCppSummarizer
+
+        summarizer = LlamaCppSummarizer(config)
+        problem = summarizer.problem()
+        assert problem is not None
+        assert "Unknown model 'mlx-community--gemma-4-26B-A4B-it-qat-4bit'" in problem
+        assert 'set summarization.backend = "omlx"' in problem
+        assert summarizer.is_available() is False
 
 
 class TestLlamaCppGenerateTitle:
