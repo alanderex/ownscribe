@@ -156,7 +156,15 @@ private struct SummarizationTab: View {
         Form {
             Toggle("Summarize after transcription",
                    isOn: engine.boolBinding(\.summarization.enabled, key: "summarization.enabled"))
-            if enabled {
+            if !enabled {
+                Text("Recordings are transcribed only. Summarize… in a meeting writes a summary on demand, "
+                     + "with the settings below.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // Always shown: Summarize… uses them whether or not summaries are automatic.
+            Group {
                 Picker("Backend", selection: engine.stringBinding(\.summarization.backend, key: "summarization.backend")) {
                     Text("Local (built-in)").tag("local")
                     Text("oMLX").tag("omlx")
@@ -190,10 +198,6 @@ private struct SummarizationTab: View {
                 Picker("Template", selection: templateBinding) {
                     ForEach(engine.availableTemplates, id: \.self) { Text($0.capitalized).tag($0) }
                 }
-            } else {
-                Text("Recordings will be transcribed only — no summary is generated.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
     }
