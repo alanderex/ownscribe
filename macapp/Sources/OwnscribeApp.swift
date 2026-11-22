@@ -98,6 +98,7 @@ struct MainWindowScene: Scene {
         .commands {
             SettingsCommands(windows: model.windows)
             LibraryCommands()
+            InspectorCommands()
             RecordingCommands(recorder: model.recorder, jobs: model.jobs)
         }
     }

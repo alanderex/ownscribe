@@ -21,36 +21,72 @@ struct MeetingDetailView: View {
     @State private var loadedPath: String?
     /// nil until chosen: the summary when there is one, the transcript otherwise.
     @State private var chosenTab: Tab?
-    @State private var namingSkipped: Set<String> = []
     @State private var player = TurnPlayer()
+    @SceneStorage("speakerInspectorShown") private var inspectorShown = false
+    /// The speaker picked in the inspector: their lines are highlighted.
+    @State private var selectedSpeaker: String?
+    @State private var isSaving = false
+    @State private var saveProblem: String?
     /// Lines waiting for a name typed for "New Speaker…".
     @State private var newSpeakerLines: [Int]?
     @State private var newSpeakerName = ""
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                MeetingHeader(
-                    row: row, language: document?.language,
-                    day: library.calendar.day(of: row), time: library.calendar.time(of: row)
-                )
-                tabBar
-                Divider()
-                switch tab {
-                case .summary: summaryBody
-                case .transcript: transcriptBody
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    MeetingHeader(
+                        row: row, language: document?.language,
+                        day: library.calendar.day(of: row), time: library.calendar.time(of: row)
+                    )
+                    tabBar
+                    Divider()
+                    switch tab {
+                    case .summary: summaryBody
+                    case .transcript: transcriptBody
+                    }
                 }
+                // A readable measure: long lines at window width are hard to follow.
+                .frame(maxWidth: 720, alignment: .leading)
+                .padding(28)
+                .frame(maxWidth: .infinity)
             }
-            // A readable measure: long lines at window width are hard to follow.
-            .frame(maxWidth: 720, alignment: .leading)
-            .padding(28)
-            .frame(maxWidth: .infinity)
+            .onChange(of: selectedSpeaker) { _, speaker in
+                guard let speaker, let turn = firstTurn(of: speaker) else { return }
+                chosenTab = .transcript
+                withAnimation { proxy.scrollTo(turn, anchor: .top) }
+            }
         }
+        .inspector(isPresented: $inspectorShown) { inspector }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    inspectorShown.toggle()
+                } label: {
+                    Label("Speakers", systemImage: "person.2")
+                }
+                .help("Show or hide the speakers (⌥⌘I)")
+            }
+        }
+        .focusedSceneValue(\.speakerInspectorShown, $inspectorShown)
         .task(id: row) {
+            // Leaving a meeting saves its draft; a refusal keeps it for when the
+            // meeting is opened again.
+            let otherMeeting = loadedPath != row.path
+            if otherMeeting, let previous = loadedPath {
+                saveInBackground(previous)
+            }
             player.stop()
+            if otherMeeting {
+                selectedSpeaker = nil
+                saveProblem = nil
+            }
             await load()
         }
-        .onDisappear { player.stop() }
+        .onDisappear {
+            player.stop()
+            saveInBackground(row.path)
+        }
         .alert("New Speaker", isPresented: newSpeakerPrompt) {
             TextField("Name", text: $newSpeakerName)
             Button("Move") { moveToTypedSpeaker() }
@@ -64,7 +100,84 @@ struct MeetingDetailView: View {
     /// with a CLI that numbers the transcript's lines.
     private var canEdit: Bool {
         guard let document, document.revision != nil, !engine.isDegraded else { return false }
-        return row.status.busy != .busy && jobs.ownedFolder != row.path
+        return readOnlyReason == nil
+    }
+
+    /// Why the speakers cannot be edited now. A folder whose lock state is unknown (a
+    /// volume without lock support) stays editable.
+    private var readOnlyReason: String? {
+        if row.status.busy == .busy || jobs.ownedFolder == row.path {
+            return "Processing… Speakers can be edited when this meeting is done."
+        }
+        if document?.revision == nil {
+            return "Editing speakers needs the updated ownscribe engine."
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private var inspector: some View {
+        if let document, !engine.isDegraded, !document.turns.isEmpty {
+            SpeakerInspector(
+                document: document,
+                draft: editor.draft(for: row.path, document: document),
+                readOnlyReason: readOnlyReason,
+                knownNames: library.knownSpeakerNames,
+                selectedSpeaker: $selectedSpeaker,
+                rename: { label, name in
+                    editor.update(row.path, document: document) { $0.rename(label, to: name) }
+                },
+                save: { Task { await save() } },
+                discard: {
+                    editor.discard(row.path)
+                    saveProblem = nil
+                },
+                isSaving: isSaving,
+                problem: saveProblem
+            )
+        } else {
+            ContentUnavailableView(
+                "No Speakers", systemImage: "person.2.slash",
+                description: Text(engine.isDegraded
+                    ? "Speaker editing returns after the update."
+                    : "This meeting has no transcript to take speakers from.")
+            )
+        }
+    }
+
+    /// The first turn with a line by `speaker` in the draft.
+    private func firstTurn(of speaker: String) -> Int? {
+        guard let document else { return nil }
+        let draft = editor.draft(for: row.path, document: document)
+        return document.turns.first { turn in
+            turn.segments.isEmpty
+                ? turn.speaker == speaker
+                : turn.segments.contains { draft.speaker(ofLine: $0.index) == speaker }
+        }?.ordinal
+    }
+
+    private func save() async {
+        isSaving = true
+        saveProblem = nil
+        defer { isSaving = false }
+        switch await editor.save(row.path, with: engine.cli) {
+        case .saved:
+            await load()
+            library.refresh()
+        case .busy(let message), .failed(let message):
+            saveProblem = message
+        case .transcriptChanged:
+            await load()
+            if let document { editor.carryNames(row.path, to: document) }
+            saveProblem = "The transcript changed since it was shown. The names are kept; move the lines again."
+        }
+    }
+
+    private func saveInBackground(_ path: String) {
+        guard editor.hasEdits(path) else { return }
+        Task {
+            if await editor.save(path, with: engine.cli) == .saved { library.refresh() }
+        }
     }
 
     private var newSpeakerPrompt: Binding<Bool> {
@@ -146,16 +259,6 @@ struct MeetingDetailView: View {
     @ViewBuilder
     private var transcriptBody: some View {
         if let document {
-            let unnamed = document.unnamedSpeakers
-            if !unnamed.isEmpty && !namingSkipped.contains(row.path) {
-                SpeakerNamingView(
-                    labels: document.speakers.map(\.label),
-                    apply: { names in Task { await rename(names) } },
-                    skip: { namingSkipped.insert(row.path) }
-                )
-                .padding(12)
-                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-            }
             if document.turns.isEmpty {
                 Text("No transcript for this meeting.")
                     .foregroundStyle(.secondary)
@@ -169,6 +272,7 @@ struct MeetingDetailView: View {
                     document: document,
                     draft: editor.draft(for: row.path, document: document),
                     playingLine: player.playingLine,
+                    highlighted: selectedSpeaker,
                     play: playAction,
                     move: canEdit ? { lines, target in
                         editor.update(row.path, document: document) { $0.move(lines: lines, to: target) }
@@ -195,6 +299,7 @@ struct MeetingDetailView: View {
 
     private func load() async {
         let folder = row.url
+        let firstLoad = loadedPath != row.path
         async let summaryText = Task.detached { SummaryFile.text(inFolder: folder) }.value
         if engine.isDegraded {
             document = nil
@@ -210,21 +315,11 @@ struct MeetingDetailView: View {
         }
         summary = await summaryText
         loadedPath = row.path
-    }
-
-    /// Rename in every transcript file the folder has, so `show` (which prefers
-    /// transcript.json) and the markdown agree.
-    private func rename(_ names: [String: String]) async {
-        let mapping = names.filter { !$0.value.trimmingCharacters(in: .whitespaces).isEmpty }
-        guard !mapping.isEmpty else { namingSkipped.insert(row.path); return }
-        for name in ["transcript.json", "transcript.md"] {
-            let url = row.url.appendingPathComponent(name)
-            if FileManager.default.fileExists(atPath: url.path) {
-                await engine.cli.renameSpeakers(url, mapping: mapping)
-            }
+        // Speakers nobody named yet: the inspector opens to name them, once per visit,
+        // so a refresh never reopens what the user closed.
+        if firstLoad, let document, canEdit, !document.unnamedSpeakers.isEmpty {
+            inspectorShown = true
         }
-        await load()
-        library.refresh()
     }
 
     private static func describe(_ error: Error) -> String {

@@ -10,6 +10,8 @@ struct TranscriptView: View {
     let document: MeetingDocument
     let draft: SpeakerDraft
     let playingLine: Int?
+    /// The speaker picked in the inspector, whose lines stand out.
+    let highlighted: String?
     let play: ((MeetingDocument.Segment) -> Void)?
     /// nil while speakers cannot be edited (a job owns the folder, or an older CLI).
     let move: (([Int], String) -> Void)?
@@ -23,6 +25,7 @@ struct TranscriptView: View {
                     turn: turn,
                     draft: draft,
                     playingLine: playingLine,
+                    highlighted: highlighted,
                     play: play,
                     move: move,
                     moveToNewSpeaker: moveToNewSpeaker
@@ -37,6 +40,7 @@ private struct TurnView: View {
     let turn: MeetingDocument.Turn
     let draft: SpeakerDraft
     let playingLine: Int?
+    let highlighted: String?
     let play: ((MeetingDocument.Segment) -> Void)?
     let move: (([Int], String) -> Void)?
     let moveToNewSpeaker: (([Int]) -> Void)?
@@ -61,6 +65,7 @@ private struct TurnView: View {
                             turn: turn,
                             draft: draft,
                             isPlaying: playingLine == segment.index,
+                            isHighlighted: highlighted != nil && draft.speaker(ofLine: segment.index) == highlighted,
                             play: play.map { action in { action(segment) } },
                             move: move,
                             moveToNewSpeaker: moveToNewSpeaker
@@ -100,6 +105,7 @@ private struct LineView: View {
     let turn: MeetingDocument.Turn
     let draft: SpeakerDraft
     let isPlaying: Bool
+    let isHighlighted: Bool
     let play: (() -> Void)?
     let move: (([Int], String) -> Void)?
     let moveToNewSpeaker: (([Int]) -> Void)?
@@ -120,6 +126,10 @@ private struct LineView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            isHighlighted ? AnyShapeStyle(.selection.opacity(0.2)) : AnyShapeStyle(.clear),
+            in: RoundedRectangle(cornerRadius: 4)
+        )
         .contentShape(Rectangle())
         // Simultaneous, so selecting the line's text still works.
         .simultaneousGesture(TapGesture().onEnded { play?() })

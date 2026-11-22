@@ -142,3 +142,15 @@ struct LibraryListing: Decodable {
         return listing.meetings
     }
 }
+
+extension LibraryRow {
+    /// Names given to speakers anywhere in the library, sorted: what to offer when
+    /// naming a speaker. Labels nobody named, and the "Unknown" of an unlabelled line,
+    /// are not names.
+    static func speakerNames(in rows: [LibraryRow]) -> [String] {
+        let names = Set(rows.flatMap(\.speakers)).filter { name in
+            !MeetingDocument.isUnnamedLabel(name) && name != "Unknown"
+        }
+        return names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+}

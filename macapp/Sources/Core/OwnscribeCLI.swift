@@ -228,13 +228,4 @@ final class OwnscribeCLI {
     func editSpeakers(_ folder: URL, arguments: [String]) async -> CommandResult {
         await run(["edit-speakers", folder.path] + arguments)
     }
-
-    @discardableResult
-    func renameSpeakers(_ transcript: URL, mapping: [String: String]) async -> CommandResult {
-        var args = ["rename-speakers", transcript.path]
-        for (label, name) in mapping {
-            args += ["--map", "\(label)=\(name)"]
-        }
-        return await run(args)
-    }
 }

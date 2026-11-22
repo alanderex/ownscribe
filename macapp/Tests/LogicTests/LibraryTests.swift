@@ -51,6 +51,18 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(rows[0].status.holderPid, 4711)
     }
 
+    func testSpeakerNamesAreTheNamedSpeakersOfTheWholeLibrary() {
+        func meeting(_ speakers: [String]) -> LibraryRow {
+            LibraryRow(
+                path: "/n/\(speakers.joined())", nameDay: nil, created: nil, title: "T", duration: nil,
+                speakerCount: speakers.count, speakers: speakers,
+                status: .init(transcript: "present", summary: "present", audio: nil, orig: false)
+            )
+        }
+        let rows = [meeting(["Ben", "SPEAKER_00"]), meeting(["anna", "Ben", "Unknown"]), meeting([])]
+        XCTAssertEqual(LibraryRow.speakerNames(in: rows), ["anna", "Ben"])
+    }
+
     func testRefusesAnUnknownSchema() {
         let json = #"{"schema": 2, "meetings": []}"#
         XCTAssertThrowsError(try LibraryListing.decode(Data(json.utf8))) { error in
