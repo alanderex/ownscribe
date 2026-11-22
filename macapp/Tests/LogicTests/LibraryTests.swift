@@ -112,6 +112,18 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(Set(sections.flatMap { $0.rows.map(\.title) }), ["done", "summary-only"])
     }
 
+    func testSectionsLeaveOutBusyFoldersButNotUnknownOnes() {
+        func meeting(_ name: String, _ busy: LibraryRow.Status.Busy) -> LibraryRow {
+            LibraryRow(
+                path: "/n/\(name)", nameDay: "2026-11-20", created: nil, title: name, duration: nil,
+                speakerCount: 0,
+                status: .init(transcript: "present", summary: "present", audio: nil, orig: false, busy: busy)
+            )
+        }
+        let rows = [meeting("free", .free), meeting("held", .busy), meeting("no-locks", .unknown)]
+        XCTAssertEqual(Set(berlin.sections(rows).flatMap { $0.rows.map(\.title) }), ["free", "no-locks"])
+    }
+
     func testUndatedRowsGoLast() {
         let rows = [row("x", day: nil, created: nil), row("y", day: "2026-01-01", created: nil)]
         XCTAssertEqual(berlin.sections(rows).map(\.day.description).last, Date.distantPast.description)
