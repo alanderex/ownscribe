@@ -35,9 +35,10 @@ def read_meta(folder: Path) -> dict[str, Any]:
     return data
 
 
-def summary_is_stale(folder: Path) -> bool:
-    """True after a speaker move that the summary was written before."""
-    return read_meta(folder).get("summary_stale") is True
+def summary_is_stale(folder: Path, meta: dict[str, Any] | None = None) -> bool:
+    """True after a speaker move that the summary was written before; `meta` is the
+    folder's metadata when the caller has read it already."""
+    return (read_meta(folder) if meta is None else meta).get("summary_stale") is True
 
 
 def mark_summary_stale(folder: Path) -> None:

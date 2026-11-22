@@ -77,6 +77,15 @@ def group_tags(folder_tags: Iterable[tuple[Path, Sequence[str]]]) -> dict[str, L
     return {key: LibraryTag(spellings[key], tuple(having)) for key, having in folders.items()}
 
 
+def in_library_spelling(tags: Sequence[str], library: Mapping[str, LibraryTag]) -> list[str]:
+    """A meeting's tags as the library spells them, each once, in the meeting's order.
+
+    `show --list` reports them so, and the app matches tags exactly instead of
+    folding case itself.
+    """
+    return list(dict.fromkeys(library[tag.casefold()].name for tag in tags))
+
+
 def library_tags(config: Config) -> dict[str, LibraryTag]:
     """Every tag in the output directory, keyed by its case-folded form."""
     return group_tags((folder, meeting_tags(folder)) for folder in meeting_folders(config.output.resolved_dir))
