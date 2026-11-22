@@ -21,7 +21,7 @@ from typing import Protocol
 
 from ownscribe.config import Config
 from ownscribe.locks import probe
-from ownscribe.meeting_files import ORIGINAL_NAMES, TRANSCRIPT_NAMES
+from ownscribe.meeting_files import ORIGINAL_NAMES, TRANSCRIPT_NAMES, meeting_folders
 from ownscribe.meeting_meta import summary_is_stale
 from ownscribe.pipeline import _find_summary, find_meeting_audio
 from ownscribe.transcript_io import read_transcript
@@ -232,13 +232,10 @@ def _turn_json(turn: Turn) -> dict:
 def meeting_rows(config: Config) -> dict:
     """One row per meeting folder in the output directory, for the app's library.
 
-    A folder is any non-hidden directory there, including ones holding only audio
-    or only crash leftovers: the app decides what each status means. A missing
-    output directory is an empty library, not an error; nothing has been
-    recorded yet.
+    Folders holding only audio or crash leftovers are listed too: the app decides
+    what each status means.
     """
-    base = config.output.resolved_dir
-    folders = sorted(p for p in base.iterdir() if p.is_dir() and not p.name.startswith(".")) if base.is_dir() else []
+    folders = meeting_folders(config.output.resolved_dir)
     return {"schema": SCHEMA_VERSION, "meetings": [_row(config, folder) for folder in folders]}
 
 

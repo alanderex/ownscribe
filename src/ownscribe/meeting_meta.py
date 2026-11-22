@@ -1,8 +1,8 @@
 """Per-meeting app metadata in `<folder>/.ownscribe.json`.
 
-Facts about a meeting that no transcript or summary file carries: for now whether
-the summary predates a speaker move. Written atomically, by processes that hold the
-folder lock or write the summary themselves.
+Facts about a meeting that no transcript or summary file carries: whether the
+summary predates a speaker move, and the meeting's tags. Written atomically, by
+processes that hold the folder lock.
 """
 
 from __future__ import annotations
@@ -41,17 +41,20 @@ def summary_is_stale(folder: Path) -> bool:
 
 
 def mark_summary_stale(folder: Path) -> None:
-    _update(folder, summary_stale=True)
+    update_meta(folder, summary_stale=True)
 
 
 def clear_summary_stale(folder: Path) -> None:
     """Forget the stale mark; writes nothing when there is none."""
     if summary_is_stale(folder):
-        _update(folder, summary_stale=None)
+        update_meta(folder, summary_stale=None)
 
 
-def _update(folder: Path, **changes: Any) -> None:
-    """Merge `changes` into the metadata; a None value removes that key."""
+def update_meta(folder: Path, **changes: Any) -> None:
+    """Merge `changes` into the metadata; a None value removes that key.
+
+    The caller holds the folder's lock: this reads, changes and writes the file.
+    """
     data = read_meta(folder)
     for key, value in changes.items():
         if value is None:

@@ -460,6 +460,26 @@ def edit_speakers_cmd(
         click.echo(f"Nothing changed in {folder}")
 
 
+@cli.command("tag")
+@click.argument("directory", type=click.Path(exists=True, file_okay=False))
+@click.option(
+    "--add", "adds", multiple=True, metavar="TAG", help="Add a tag; the library's spelling is kept (repeatable)."
+)
+@click.option("--remove", "removes", multiple=True, metavar="TAG", help="Remove a tag (repeatable).")
+@click.pass_context
+def tag_cmd(ctx: click.Context, directory: str, adds: tuple[str, ...], removes: tuple[str, ...]) -> None:
+    """Add or remove a meeting's tags."""
+    from pathlib import Path
+
+    from ownscribe.tags import edit_tags
+
+    if not adds and not removes:
+        raise click.UsageError("Nothing to do: pass --add TAG or --remove TAG.")
+    folder = Path(directory).resolve()
+    tags = edit_tags(ctx.obj["config"], folder, add=adds, remove=removes)
+    click.echo(f"Tags of {folder.name}: {', '.join(tags) if tags else '(none)'}")
+
+
 def _parse_assignments(pairs: tuple[str, ...]) -> dict[int, str]:
     """Parse `INDEX=Name` pairs; a line given twice is an error, not a last-one-wins."""
     moves: dict[int, str] = {}
