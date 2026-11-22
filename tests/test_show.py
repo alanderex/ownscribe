@@ -14,6 +14,7 @@ from click.testing import CliRunner
 
 from ownscribe.cli import cli
 from ownscribe.config import Config
+from ownscribe.locks import LOCK_NAME
 from ownscribe.output.json_output import format_summary_json, format_transcript_json
 from ownscribe.output.markdown import format_summary, format_transcript
 from ownscribe.show import build_turns, folder_day, folder_title, meeting_detail, meeting_rows, speaker_stats
@@ -175,6 +176,8 @@ class TestMeetingDetail:
             "summary": "present",
             "audio": str(folder / "recording.wav"),
             "orig": False,
+            "busy": False,
+            "holder_pid": None,
         }
 
     def test_json_wins_over_markdown(self, config, meeting):
@@ -234,6 +237,32 @@ class TestMeetingDetail:
         (folder / "recording.wav.sys.tmp.wav").write_bytes(b"")
 
         assert meeting_detail(config, folder)["status"]["audio"] is None
+
+    @pytest.mark.macos
+    def test_a_folder_another_process_works_on_is_busy(self, config, hold_folder_lock):
+        folder = _folder(config)
+
+        with hold_folder_lock(folder) as holder:
+            status = meeting_detail(config, folder)["status"]
+            [row] = meeting_rows(config)["meetings"]
+
+        assert status["busy"] is True
+        assert status["holder_pid"] == holder.pid
+        assert row["status"]["busy"] is True
+        assert meeting_detail(config, folder)["status"]["busy"] is False
+
+    def test_an_unreadable_lock_is_unknown(self, config):
+        folder = _folder(config)
+        lock_file = folder / LOCK_NAME
+        lock_file.write_text("{}")
+        lock_file.chmod(0)
+        try:
+            status = meeting_detail(config, folder)["status"]
+        finally:
+            lock_file.chmod(0o600)
+
+        assert status["busy"] == "unknown"
+        assert status["holder_pid"] is None
 
 
 class TestMeetingRows:
@@ -354,6 +383,7 @@ import ownscribe.config as cfg
 cfg.CONFIG_PATH = Path({str(config_file)!r})
 from click.testing import CliRunner
 from ownscribe.cli import cli
+from ownscribe.locks import LOCK_NAME
 result = CliRunner().invoke(cli, ["show", "--list", "--json"])
 assert result.exit_code == 0, result.output
 heavy = {{"torch", "whisperx", "pyannote", "llama_cpp", "openai", "ollama"}}

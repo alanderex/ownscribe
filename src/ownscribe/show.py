@@ -18,6 +18,7 @@ from itertools import pairwise
 from pathlib import Path
 
 from ownscribe.config import Config
+from ownscribe.locks import probe
 from ownscribe.output.json_output import parse_transcript_json
 from ownscribe.output.markdown import parse_transcript
 from ownscribe.pipeline import _find_summary, find_meeting_audio
@@ -256,7 +257,12 @@ def _duration(result: TranscriptResult | None) -> float | None:
 
 
 def _status(config: Config, directory: Path) -> dict:
-    """What the folder holds: transcript, summary, audio and original-name copies."""
+    """What the folder holds (transcript, summary, audio, original-name copies) and
+    whether a process is working on it.
+
+    `busy` is true, false, or "unknown" on a volume where locks cannot be read;
+    `holder_pid` names the process holding the folder's lock.
+    """
     has_transcript = any((directory / name).is_file() for name in _TRANSCRIPT_NAMES)
     if _find_summary(directory) is not None:
         summary = "present"
@@ -265,11 +271,14 @@ def _status(config: Config, directory: Path) -> dict:
     else:
         summary = "disabled"
     audio = find_meeting_audio(config, directory)
+    lock = probe(directory)
     return {
         "transcript": "present" if has_transcript else "missing",
         "summary": summary,
         "audio": str(audio) if audio else None,
         "orig": any((directory / name).is_file() for name in _ORIGINAL_NAMES),
+        "busy": lock.busy,
+        "holder_pid": lock.holder_pid,
     }
 
 
