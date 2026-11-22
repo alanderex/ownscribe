@@ -582,7 +582,7 @@ def run_summarize(config: Config, transcript_file: str, *, in_place: bool = Fals
             )
         else:
             click.echo(
-                f"Error: {config.summarization.backend} is not reachable at {config.summarization.host}. "
+                f"Error: {config.summarization.backend} is not reachable at {config.summarization.resolved_host}. "
                 "Is the server running?",
                 err=True,
             )
@@ -755,7 +755,7 @@ def _do_transcribe_and_summarize(
         else:
             click.echo(
                 f"\nWarning: {config.summarization.backend} is not reachable "
-                f"at {config.summarization.host}. "
+                f"at {config.summarization.resolved_host}. "
                 "Skipping summarization. Is the server running?",
                 err=True,
             )

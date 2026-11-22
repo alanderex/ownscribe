@@ -6,7 +6,9 @@ import os
 from pathlib import Path
 from unittest import mock
 
-from ownscribe.config import Config, OutputConfig, _merge_toml, ensure_config_file
+import pytest
+
+from ownscribe.config import Config, OutputConfig, SummarizationConfig, _merge_toml, ensure_config_file
 from ownscribe.transcription.whisperx_transcriber import WhisperXTranscriber
 
 
@@ -145,6 +147,26 @@ class TestEnvOverrides:
             mock_path.exists.return_value = False
             cfg = Config.load()
         assert cfg.summarization.host == "http://remote:11434"
+
+
+class TestResolvedHost:
+    def test_explicit_host_wins(self):
+        for backend in ("ollama", "openai"):
+            cfg = SummarizationConfig(backend=backend, host="http://example:9999")
+            assert cfg.resolved_host == "http://example:9999"
+
+    def test_server_backends_keep_their_old_default(self):
+        assert SummarizationConfig(backend="ollama").resolved_host == "http://localhost:11434"
+        assert SummarizationConfig(backend="openai").resolved_host == "http://localhost:11434"
+
+    def test_host_is_empty_by_default(self):
+        # Empty means "the backend's default", so switching backends never keeps
+        # another backend's port.
+        assert Config().summarization.host == ""
+
+    def test_backend_without_a_server_has_no_host(self):
+        with pytest.raises(ValueError, match="'local' backend has no default server"):
+            _ = SummarizationConfig(backend="local").resolved_host
 
 
 class TestEnsureConfigFile:

@@ -48,7 +48,8 @@ struct OwnscribeConfig: Codable, Equatable {
         var enabled = true
         var backend = "local"
         var model = "phi-4-mini"
-        var host = "http://localhost:11434"
+        /// Empty: the CLI uses the backend's default server.
+        var host = ""
         var apiKey = ""
         var template = ""
         var contextSize = 0

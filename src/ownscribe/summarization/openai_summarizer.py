@@ -23,7 +23,7 @@ class OpenAISummarizer(Summarizer):
 
     def __init__(self, config: SummarizationConfig, templates: dict | None = None) -> None:
         super().__init__(config, templates)
-        base_url = config.host
+        base_url = config.resolved_host
         if not base_url.endswith("/v1"):
             base_url = base_url.rstrip("/") + "/v1"
         # Most local servers ignore the key; servers that require auth (e.g. oMLX)

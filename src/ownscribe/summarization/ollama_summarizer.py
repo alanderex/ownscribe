@@ -21,7 +21,7 @@ class OllamaSummarizer(Summarizer):
     def __init__(self, config: SummarizationConfig, templates: dict | None = None) -> None:
         super().__init__(config, templates)
         # Without a timeout a wedged server hangs summarize and ask forever.
-        self._client = ollama.Client(host=config.host, timeout=_HTTP_TIMEOUT)
+        self._client = ollama.Client(host=config.resolved_host, timeout=_HTTP_TIMEOUT)
         self._probed_context_size: int | None = None
 
     @property

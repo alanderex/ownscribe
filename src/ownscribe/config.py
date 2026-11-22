@@ -40,7 +40,7 @@ device = "auto"           # "auto" (mps if available), "mps", or "cpu"
 enabled = true
 backend = "local"         # "local" (built-in, no server needed), "ollama", or "openai"
 model = "phi-4-mini"      # local: "phi-4-mini", path to GGUF, or hf:owner/repo/file.gguf; ollama/openai: model name
-# host = "http://localhost:11434"  # only for ollama/openai backends
+# host = ""               # only for server backends; empty = the backend's default (ollama/openai: http://localhost:11434)
 # api_key = ""            # only for openai backend; required by servers like oMLX (or set OPENAI_API_KEY)
 # template = "meeting"    # built-in: "meeting", "lecture", or "brief"
 # context_size = 0        # context window in tokens; 0 = auto-detect (8192 for local). Longer
@@ -88,15 +88,38 @@ class DiarizationConfig:
     device: str = "auto"
 
 
+#: Where a server backend is reached when summarization.host is empty.
+_DEFAULT_HOSTS = {
+    "ollama": "http://localhost:11434",
+    "openai": "http://localhost:11434",
+}
+
+
 @dataclass
 class SummarizationConfig:
     enabled: bool = True
     backend: str = "local"
     model: str = "phi-4-mini"
-    host: str = "http://localhost:11434"
+    host: str = ""
     api_key: str = ""
     template: str = ""
     context_size: int = 0
+
+    @property
+    def resolved_host(self) -> str:
+        """The server to talk to: `host` when set, else the backend's default.
+
+        Backends listen on different ports, so one default for every backend would
+        be wrong for most of them.
+        """
+        if self.host:
+            return self.host
+        try:
+            return _DEFAULT_HOSTS[self.backend]
+        except KeyError:
+            raise ValueError(
+                f"summarization.host is empty and the {self.backend!r} backend has no default server."
+            ) from None
 
 
 @dataclass
