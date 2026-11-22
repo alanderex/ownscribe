@@ -87,3 +87,22 @@ enum LibrarySearch {
         return summary?.localizedCaseInsensitiveContains(needle) ?? false
     }
 }
+
+/// The sidebar's tag filter: with no tag selected every meeting shows, otherwise the
+/// meetings with any of the selected tags. `show --list` gives every row's tags in
+/// the library's spelling, so names match exactly and case is never folded here.
+enum LibraryTagFilter {
+    static func matches(_ row: LibraryRow, selected: Set<String>) -> Bool {
+        selected.isEmpty || !selected.isDisjoint(with: row.tags)
+    }
+
+    /// The selection as kept in scene storage, one tag per line: a tag never holds a
+    /// line break, so the line is its boundary.
+    static func encode(_ selected: Set<String>) -> String {
+        selected.sorted().joined(separator: "\n")
+    }
+
+    static func decode(_ stored: String) -> Set<String> {
+        Set(stored.split(separator: "\n").map(String.init))
+    }
+}

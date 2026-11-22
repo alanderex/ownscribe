@@ -21,4 +21,25 @@ final class LibrarySearchTests: XCTestCase {
         XCTAssertTrue(LibrarySearch.matches(row, query: "DEADLINE", summary: "The deadline moves to Friday."))
         XCTAssertFalse(LibrarySearch.matches(row, query: "hiring", summary: "The deadline moves to Friday."))
     }
+
+    func testNoSelectedTagMatchesEverything() {
+        XCTAssertTrue(LibraryTagFilter.matches(row, selected: []))
+    }
+
+    func testAnySelectedTagMatches() {
+        let tagged = LibraryRow(
+            path: "/n/a", nameDay: nil, created: nil, title: "A", duration: nil, speakerCount: 0,
+            tags: ["ClientX", "Q4"],
+            status: .init(transcript: "present", summary: "present", audio: nil, orig: false)
+        )
+        XCTAssertTrue(LibraryTagFilter.matches(tagged, selected: ["Q4", "Hiring"]))
+        XCTAssertFalse(LibraryTagFilter.matches(tagged, selected: ["Hiring"]))
+        XCTAssertFalse(LibraryTagFilter.matches(row, selected: ["ClientX"]), "an untagged meeting has none of them")
+    }
+
+    func testSelectionSurvivesStorage() {
+        let selected: Set<String> = ["ClientX", "Q4 review", "Über uns"]
+        XCTAssertEqual(LibraryTagFilter.decode(LibraryTagFilter.encode(selected)), selected)
+        XCTAssertEqual(LibraryTagFilter.decode(""), [])
+    }
 }
