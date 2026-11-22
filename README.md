@@ -195,6 +195,7 @@ ownscribe warmup                   # prefetch WhisperX/pyannote models before a 
 ownscribe transcribe recording.wav # transcribe an audio or video file: wav/mp3/mp4/mov/mkv (saved alongside)
 ownscribe summarize transcript.md  # summarize a transcript (saves alongside the input)
 ownscribe resume ./260220-1736    # resume a partial run, or process a folder's audio/video recording
+ownscribe resume ./260220-1736 --resummarize  # write the summary again (e.g. after moving speakers)
 ownscribe ask "question"           # search your meetings with a natural-language question
 ownscribe show ./260220-1736 --json # describe a meeting folder as JSON: turns, speakers, status
 ownscribe show --list --json        # list every meeting folder as JSON: day, title, duration, status

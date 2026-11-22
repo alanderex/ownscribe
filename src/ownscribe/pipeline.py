@@ -17,6 +17,7 @@ import click
 
 from ownscribe.config import Config
 from ownscribe.locks import LOCK_NAME, folder_lock, probe
+from ownscribe.meeting_meta import clear_summary_stale
 from ownscribe.progress import (
     DownloadProgressEvent,
     PipelineProgress,
@@ -560,8 +561,13 @@ def _load_transcript_text(transcript_path: Path) -> str:
     return result.speaker_text
 
 
-def run_summarize(config: Config, transcript_file: str) -> None:
-    """Summarize a transcript file and save the summary alongside the input."""
+def run_summarize(config: Config, transcript_file: str, *, in_place: bool = False) -> None:
+    """Summarize a transcript file and save the summary alongside the input.
+
+    `in_place` writes the meeting's summary again (`resume --resummarize`): into the
+    existing summary file's format, keeping the folder's name. Otherwise the format
+    follows output.format and a generated title may rename the folder.
+    """
     transcript_path = Path(transcript_file).resolve()
     transcript_text = _load_transcript_text(transcript_path)
 
@@ -615,23 +621,22 @@ def run_summarize(config: Config, transcript_file: str) -> None:
                     )
                     raise SystemExit(1) from None
             summary = summarizer.summarize(transcript_text)
-            title_slug = _generate_title_slug(summary, summarizer)
+            title_slug = "" if in_place else _generate_title_slug(summary, summarizer)
             progress.complete("summarizing")
     finally:
         summarizer.close()
 
-    # Honour output.format: the main pipeline writes summary.json for JSON output,
-    # so summarize/resume writing markdown to summary.md left a mixed directory.
-    if config.output.format == "json":
+    summary_ext = _summary_format(config, out_dir, in_place=in_place)
+    summary_md = format_summary(summary)  # the console shows the readable form either way
+    if summary_ext == "json":
         from ownscribe.output.json_output import format_summary_json
 
-        summary_md = format_summary(summary)  # console still shows the readable form
-        summary_ext, summary_body = "json", format_summary_json(summary)
+        summary_body = format_summary_json(summary)
     else:
-        summary_md = format_summary(summary)
-        summary_ext, summary_body = "md", summary_md
+        summary_body = summary_md
     summary_path = out_dir / f"summary.{summary_ext}"
     summary_path.write_text(summary_body)
+    clear_summary_stale(out_dir)
 
     if title_slug:
         out_dir, old_out_dir = _rename_output_dir(out_dir, title_slug), out_dir
@@ -651,6 +656,19 @@ def run_summarize(config: Config, transcript_file: str) -> None:
     click.echo(f"\n{summary_md}")
     click.echo(f"Summary saved to {summary_path}")
     _emit_meeting_saved(out_dir, "ok")
+
+
+def _summary_format(config: Config, out_dir: Path, *, in_place: bool) -> str:
+    """The summary file's extension: the existing summary's when rewriting in place.
+
+    Otherwise output.format decides: the main pipeline writes summary.json for JSON
+    output, so summarize/resume writing markdown to summary.md left a mixed
+    directory. In place, writing the other format would leave the old summary
+    beside the new one, still the one that is read.
+    """
+    if in_place and (existing := _find_summary(out_dir)) is not None:
+        return existing.suffix.removeprefix(".")
+    return "json" if config.output.format == "json" else "md"
 
 
 def _do_transcribe_and_summarize(
@@ -717,6 +735,7 @@ def _do_transcribe_and_summarize(
                         _, summary_str = _format_output(config, result, summary)
                         summary_path = out_dir / f"summary.{ext}"
                         summary_path.write_text(summary_str or summary)
+                        clear_summary_stale(out_dir)
                         title_slug = _generate_title_slug(summary, summarizer)
                         progress.complete("summarizing")
                     except Exception:
@@ -868,15 +887,32 @@ def _find_summary(directory: Path) -> Path | None:
     return None
 
 
-def run_resume(config: Config, directory: str) -> None:
-    """Resume a partially-completed pipeline in the given directory."""
+def run_resume(config: Config, directory: str, *, resummarize: bool = False) -> None:
+    """Resume a partially-completed pipeline in the given directory.
+
+    `resummarize` writes the summary again from the current transcript, for a
+    summary written before speakers were moved; the folder keeps its name.
+    """
     dir_path = Path(directory).resolve()
     if not dir_path.is_dir():
         click.echo(f"Error: {dir_path} is not a directory.", err=True)
         raise SystemExit(1)
 
     with folder_lock(dir_path, "resume"):
-        _resume_locked(config, dir_path)
+        if resummarize:
+            _resummarize(config, dir_path)
+        else:
+            _resume_locked(config, dir_path)
+
+
+def _resummarize(config: Config, dir_path: Path) -> None:
+    transcript = _find_transcript(dir_path)
+    if transcript is None:
+        click.echo(f"Error: No transcript in {dir_path} to summarize.", err=True)
+        raise SystemExit(1)
+    click.echo(f"Found transcript: {transcript}")
+    click.echo("Writing the summary again.\n")
+    run_summarize(config, str(transcript), in_place=True)
 
 
 def _resume_locked(config: Config, dir_path: Path) -> None:

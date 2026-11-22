@@ -1627,3 +1627,98 @@ class TestFolderLocking:
 
         assert renamed == tmp_path / "260101-budget-review_1200"
         assert claimed.is_dir()
+
+
+class TestResummarize:
+    """resume --resummarize writes the summary again after speakers were moved."""
+
+    @staticmethod
+    def _folder(tmp_path, summary_name: str = "summary.md"):
+        from ownscribe.meeting_meta import mark_summary_stale
+
+        folder = tmp_path / "notes" / "260101-budget-review"
+        folder.mkdir(parents=True)
+        (folder / "transcript.md").write_text("# Transcript\n\n**Anna** [00:00]\nHello.\n")
+        (folder / summary_name).write_text("old summary")
+        mark_summary_stale(folder)
+        return folder
+
+    @staticmethod
+    def _resummarize(folder, config: Config | None = None):
+        from ownscribe.pipeline import run_resume
+
+        summarizer = TestMeetingSavedEvent._summarizer(title="A Different Title")
+        with (
+            mock.patch("ownscribe.pipeline.create_summarizer", return_value=summarizer),
+            mock.patch("ownscribe.pipeline._needs_model_download", return_value=False),
+        ):
+            run_resume(config or Config(), str(folder), resummarize=True)
+        return summarizer
+
+    def test_rewrites_the_summary_and_keeps_the_folder_name(self, tmp_path):
+        from ownscribe.meeting_meta import summary_is_stale
+        from ownscribe.output.markdown import format_summary
+
+        folder = self._folder(tmp_path)
+
+        summarizer = self._resummarize(folder)
+
+        assert folder.is_dir()
+        assert (folder / "summary.md").read_text() == format_summary("## Summary\nGood meeting.")
+        assert not summary_is_stale(folder)
+        summarizer.generate_title.assert_not_called()
+
+    def test_keeps_the_existing_summary_format(self, tmp_path):
+        folder = self._folder(tmp_path, summary_name="summary.json")
+
+        self._resummarize(folder)  # output.format is markdown by default
+
+        assert json.loads((folder / "summary.json").read_text()) == {"summary": "## Summary\nGood meeting."}
+        assert not (folder / "summary.md").exists()
+
+    def test_reports_the_same_folder_as_saved(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setenv("OWNSCRIBE_PROGRESS_EVENTS", "1")
+        folder = self._folder(tmp_path)
+
+        self._resummarize(folder)
+
+        saved = [e for e in TestMeetingSavedEvent._events(capsys) if e["event"] == "meeting_saved"]
+        assert saved == [{"ownscribe_progress": 1, "event": "meeting_saved", "folder": str(folder), "summary": "ok"}]
+
+    def test_a_folder_without_a_transcript_fails(self, tmp_path, capsys):
+        import pytest
+
+        from ownscribe.pipeline import run_resume
+
+        with pytest.raises(SystemExit):
+            run_resume(Config(), str(tmp_path), resummarize=True)
+
+        assert "No transcript" in capsys.readouterr().err
+
+    def test_any_new_summary_clears_the_stale_mark(self, tmp_path):
+        from ownscribe.meeting_meta import summary_is_stale
+        from ownscribe.pipeline import run_summarize
+
+        folder = self._folder(tmp_path)
+        summarizer = TestMeetingSavedEvent._summarizer(title="")
+        with (
+            mock.patch("ownscribe.pipeline.create_summarizer", return_value=summarizer),
+            mock.patch("ownscribe.pipeline._needs_model_download", return_value=False),
+        ):
+            run_summarize(Config(), str(folder / "transcript.md"))
+
+        assert not summary_is_stale(folder)
+
+    def test_the_cli_flag_reaches_resume(self, tmp_path):
+        from click.testing import CliRunner
+
+        from ownscribe.cli import cli
+
+        with (
+            mock.patch("ownscribe.cli.Config.load", return_value=Config()),
+            mock.patch("ownscribe.pipeline.run_resume") as resume,
+        ):
+            result = CliRunner().invoke(cli, ["resume", str(tmp_path), "--resummarize"])
+
+        assert result.exit_code == 0, result.output
+        assert resume.call_args.kwargs == {"resummarize": True}

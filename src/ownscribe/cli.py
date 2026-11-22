@@ -263,6 +263,11 @@ def summarize(ctx: click.Context, file: str, template: str | None) -> None:
 @click.option("--model", default=None, help="Whisper model size (tiny, base, small, medium, large-v3).")
 @click.option("--language", default=None, help="Language code for transcription (e.g. en, de, fr).")
 @click.option("--template", default=None, help="Summarization template (meeting, lecture, brief, or custom).")
+@click.option(
+    "--resummarize",
+    is_flag=True,
+    help="Write the summary again from the current transcript (after moving speakers); keeps the folder name.",
+)
 @click.pass_context
 def resume(
     ctx: click.Context,
@@ -270,6 +275,7 @@ def resume(
     model: str | None,
     language: str | None,
     template: str | None,
+    resummarize: bool,
 ) -> None:
     """Resume a partially-completed pipeline in a meeting directory."""
     config = ctx.obj["config"]
@@ -282,7 +288,7 @@ def resume(
 
     from ownscribe.pipeline import run_resume
 
-    run_resume(config, directory)
+    run_resume(config, directory, resummarize=resummarize)
 
 
 @cli.command()
