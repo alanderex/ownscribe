@@ -1630,6 +1630,45 @@ class TestFolderLocking:
 
         assert seen == [LockState(busy=True, holder_pid=os.getpid())]
 
+    def test_summarize_refuses_a_folder_another_process_holds(self, tmp_path, hold_folder_lock):
+        from ownscribe.locks import BUSY_EXIT_CODE, FolderBusyError
+        from ownscribe.pipeline import run_summarize
+
+        transcript = tmp_path / "transcript.md"
+        transcript.write_text("# Transcript\n\n[00:00] Hello.\n")
+        with (
+            hold_folder_lock(tmp_path) as holder,
+            mock.patch("ownscribe.pipeline.create_summarizer") as create,
+            pytest.raises(FolderBusyError) as refused,
+        ):
+            run_summarize(Config(), str(transcript))
+
+        assert refused.value.exit_code == BUSY_EXIT_CODE
+        assert refused.value.holder_pid == holder.pid
+        create.assert_not_called()
+        assert sorted(p.name for p in tmp_path.iterdir()) == [".ownscribe.lock", "transcript.md"]
+
+    def test_summarize_holds_the_lock_while_it_writes(self, tmp_path):
+        from ownscribe.locks import LockState, probe
+        from ownscribe.pipeline import run_summarize
+
+        transcript = tmp_path / "transcript.md"
+        transcript.write_text("# Transcript\n\n[00:00] Hello.\n")
+        seen: list[LockState] = []
+        summarizer = mock.MagicMock()
+        summarizer.problem.return_value = None
+        summarizer.summarize.side_effect = lambda _text: seen.append(probe(tmp_path)) or "## Summary"
+        summarizer.generate_title.return_value = ""
+        with (
+            mock.patch("ownscribe.pipeline.create_summarizer", return_value=summarizer),
+            mock.patch("ownscribe.pipeline._needs_model_download", return_value=False),
+            mock.patch("ownscribe.pipeline._download_summarization_model"),
+        ):
+            run_summarize(Config(), str(transcript))
+
+        assert seen == [LockState(busy=True, holder_pid=os.getpid())]
+        assert (tmp_path / "summary.md").is_file()
+
     def test_a_title_can_take_the_name_of_a_folder_holding_only_a_free_lock_file(self, tmp_path):
         from ownscribe.locks import LOCK_NAME
         from ownscribe.pipeline import _rename_output_dir

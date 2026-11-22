@@ -565,8 +565,17 @@ def run_summarize(config: Config, transcript_file: str, *, in_place: bool = Fals
     `in_place` writes the meeting's summary again (`resume --resummarize`): into the
     existing summary file's format, keeping the folder's name. Otherwise the format
     follows output.format and a generated title may rename the folder.
+
+    Holds the folder's lock, like every writer of `.ownscribe.json`: the summary
+    clears its stale mark there, and a `tag` or `edit-speakers` running meanwhile
+    would otherwise lose its own change to that file.
     """
     transcript_path = Path(transcript_file).resolve()
+    with folder_lock(transcript_path.parent, "summarize"):
+        _summarize(config, transcript_path, in_place=in_place)
+
+
+def _summarize(config: Config, transcript_path: Path, *, in_place: bool) -> None:
     transcript_text = _load_transcript_text(transcript_path)
 
     try:
