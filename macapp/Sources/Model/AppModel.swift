@@ -8,6 +8,7 @@ final class AppModel {
     let jobs: Jobs
     let recorder: Recorder
     let windows: WindowCoordinator
+    let speakerEditor: SpeakerEditor
 
     init() {
         engine = Engine()
@@ -15,6 +16,7 @@ final class AppModel {
         jobs = Jobs(engine: engine, library: library)
         recorder = Recorder(engine: engine, jobs: jobs)
         windows = WindowCoordinator()
+        speakerEditor = SpeakerEditor()
         engine.onConfigLoaded = { [weak library] in library?.refresh() }
         // A deferred upgrade waits for the environment to be free; the app's own
         // job ending is the likeliest moment.

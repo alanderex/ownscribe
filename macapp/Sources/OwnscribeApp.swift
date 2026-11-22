@@ -98,6 +98,7 @@ struct MainWindowScene: Scene {
         .commands {
             SettingsCommands(windows: model.windows)
             LibraryCommands()
+            InspectorCommands()
             RecordingCommands(recorder: model.recorder, jobs: model.jobs)
         }
     }
@@ -137,5 +138,6 @@ extension View {
             .environment(model.jobs)
             .environment(model.library)
             .environment(model.windows)
+            .environment(model.speakerEditor)
     }
 }

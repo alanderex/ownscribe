@@ -10,12 +10,18 @@ from ownscribe.transcription.models import Segment, TranscriptResult, Word
 
 def format_transcript_json(result: TranscriptResult) -> str:
     """Format a transcript result as JSON."""
-    return json.dumps(asdict(result), indent=2, ensure_ascii=False)
+    return dump_json(asdict(result))
+
+
+def dump_json(data: object) -> str:
+    """ownscribe's JSON file layout. Edits that patch a parsed transcript or summary
+    document write it back through here, so an edited file keeps the layout."""
+    return json.dumps(data, indent=2, ensure_ascii=False)
 
 
 def format_summary_json(summary_text: str) -> str:
     """Format a summary as JSON, so summary.json really holds JSON."""
-    return json.dumps({"summary": summary_text.strip()}, indent=2, ensure_ascii=False)
+    return dump_json({"summary": summary_text.strip()})
 
 
 def parse_transcript_json(text: str) -> TranscriptResult | None:

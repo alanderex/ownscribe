@@ -1,9 +1,11 @@
 """List and rename diarized speaker labels in saved transcripts.
 
 Diarization emits anonymous labels (``SPEAKER_00``, ``SPEAKER_01``, …) that are
-not stable across meetings, so naming happens per meeting after the fact. The
-summarizer never sees these labels (it summarizes plain segment text), so
-renaming is a pure rewrite of the transcript file — no re-summarization needed.
+not stable across meetings, so naming happens per meeting after the fact.
+
+These functions rewrite one transcript file. The summarizer is fed text that
+carries the labels, so a summary names them too; ``speaker_edits`` renames across
+transcript and summary together (``ownscribe edit-speakers``).
 
 Works on both output formats: markdown (the default) and JSON.
 """
@@ -13,6 +15,8 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+
+from ownscribe.output.json_output import dump_json
 
 # Speaker header line written by output/markdown.py: ``**LABEL** [mm:ss]``.
 # Anchored to line start so body lines (``[mm:ss] text``) never match.
@@ -67,7 +71,7 @@ def rename_json(text: str, mapping: dict[str, str]) -> str:
         for word in seg.get("words", []):
             if word.get("speaker") in mapping:
                 word["speaker"] = mapping[word["speaker"]]
-    return json.dumps(data, indent=2, ensure_ascii=False)
+    return dump_json(data)
 
 
 def list_speakers(path: Path) -> list[str]:

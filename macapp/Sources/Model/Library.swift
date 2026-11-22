@@ -129,6 +129,9 @@ final class Library {
         unseen.remove(path)
     }
 
+    /// Names given to speakers anywhere in the library, offered when naming speakers.
+    var knownSpeakerNames: [String] { LibraryRow.speakerNames(in: rows) }
+
     /// The newest meetings, for the menu.
     func recentRows(_ count: Int) -> [LibraryRow] {
         Array(calendar.sections(rows).lazy.flatMap(\.rows).prefix(count))

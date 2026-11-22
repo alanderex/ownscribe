@@ -87,9 +87,10 @@ Works with any app that outputs audio through Core Audio (Zoom, Teams, Meet, etc
 ## Menu-bar app (macOS)
 
 A native SwiftUI app lives in [`macapp/`](macapp/README.md): a recorder in the
-menu bar and a window with your meetings, their summaries and transcripts, and
-playback from any transcript turn. It drives this CLI as a subprocess — config,
-recordings and output are shared — and renders live pipeline progress. See
+menu bar and a window with your meetings, their summaries and transcripts,
+playback from any transcript line, and a speaker editor to name, merge, and move
+lines between speakers. It drives this CLI as a subprocess — config, recordings
+and output are shared — and renders live pipeline progress. See
 `macapp/README.md` for building it.
 
 ## Installation
@@ -195,11 +196,15 @@ ownscribe warmup                   # prefetch WhisperX/pyannote models before a 
 ownscribe transcribe recording.wav # transcribe an audio or video file: wav/mp3/mp4/mov/mkv (saved alongside)
 ownscribe summarize transcript.md  # summarize a transcript (saves alongside the input)
 ownscribe resume ./260220-1736    # resume a partial run, or process a folder's audio/video recording
+ownscribe resume ./260220-1736 --resummarize  # write the summary again (e.g. after moving speakers)
 ownscribe ask "question"           # search your meetings with a natural-language question
 ownscribe show ./260220-1736 --json # describe a meeting folder as JSON: turns, speakers, status
 ownscribe show --list --json        # list every meeting folder as JSON: day, title, duration, status
 ownscribe list-speakers transcript.md                       # list diarized speaker labels (JSON)
 ownscribe rename-speakers transcript.md --map SPEAKER_00=Anna # name speakers in a transcript
+ownscribe edit-speakers ./260220-1736 --map SPEAKER_00=Anna  # rename or merge speakers in transcript + summary
+ownscribe edit-speakers ./260220-1736 --revert              # undo every speaker edit in that folder
+ownscribe edit-speakers ./260220-1736 --assign 42=Anna --revision <rev>  # move one transcript line to Anna
 ownscribe config                   # open config file in $EDITOR
 ownscribe config get               # print effective config as JSON
 ownscribe config set summarization.backend openai           # set a value (keeps comments)
@@ -327,7 +332,22 @@ If you already know how many people are on the call, pass `--speakers N` (sets b
 
 ### Naming speakers
 
-Diarization produces anonymous labels (`SPEAKER_00`, `SPEAKER_01`, …) that aren't stable across meetings, so names are applied per transcript after the fact. Summaries don't reference speaker labels, so renaming only rewrites the transcript — no re-summarization needed:
+Diarization produces anonymous labels (`SPEAKER_00`, `SPEAKER_01`, …) that aren't stable across meetings, so names are applied per meeting after the fact. The summary is written from text that carries those labels, so `edit-speakers` renames them in the transcript and the summary together:
+
+```bash
+ownscribe edit-speakers ./260220-1736 \
+    --map SPEAKER_00=Anna --map SPEAKER_01=Bob                 # name speakers in transcript + summary
+ownscribe edit-speakers ./260220-1736 --map Bob=Anna          # two labels for one person: merge them
+ownscribe edit-speakers ./260220-1736 --revert                # back to the files before the first edit
+ownscribe edit-speakers ./260220-1736 \
+    --assign 42=Anna --revision <revision>                     # move one line (segment 42) to Anna
+```
+
+`--assign` moves single lines, numbered as `ownscribe show DIR --json` lists them under each turn's `segments`, to an existing or a new speaker; pass that output's `revision`, and the edit is refused (exit code 65) if the transcript changed since. A move rewrites a markdown transcript in ownscribe's layout and marks the summary as written before the move.
+
+The transcript changes only in its speaker labels, never in what was said. Before the first edit ownscribe keeps a copy of each changed file (`transcript.md.orig`, `summary.md.orig`), which `--revert` puts back. A folder another ownscribe process is working on is refused with exit code 75.
+
+`list-speakers` and `rename-speakers` work on a single transcript file and leave the summary alone:
 
 ```bash
 ownscribe list-speakers transcript.md                         # ["SPEAKER_00", "SPEAKER_01"]

@@ -2,13 +2,13 @@
 
 Status: 2026-11-21. v2.2. Three review rounds (Swift engineer, Python engineer, architect, UI designer): round 1 produced v2; round 2 returned approve-with-conditions from all four; round 3 (confirmation of v2.1) did the same with narrower, implementation-level points. All conditions are folded in below. Final check: the Swift engineer, Python engineer, architect and UI designer each approved this text without conditions (a contradiction the UI designer found on `busy: unknown` in Library and the inspector was fixed first, and all four confirmed the fix). Execution is in Claude Code on the Mac.
 
-Start: Phase 0 (baseline tag), then Phase 1 on branch `ui/phase-1-window-shell`.
+v2.3, 2026-11-22: the owner's amendments after the 0.16.0 release (see "Owner amendments (v2.3)"). Phase 0 and Phase 1 are done (`macapp-v0.15.4`, `macapp-v0.16.0`). Next: Phase 2 on branch `ui/phase-2-speaker-editor`.
 
 ## What changed after review
 
 **Approved by the owner (round 1)**
 - No `record` split. One `ownscribe` process per meeting, a global lock around the processing stage, a per-folder lock. Reason: with the mic on, a crashed app leaves unmerged `recording.wav.sys.tmp.wav` and `.mic.tmp.wav`, and an app-side queue is lost on quit or crash.
-- No per-turn speaker reassignment. Markdown transcripts have no turn ids, and a moved turn leaves the summary stale. Rename and merge of speaker labels stay.
+- No per-turn speaker reassignment. Markdown transcripts have no turn ids, and a moved turn leaves the summary stale. Rename and merge of speaker labels stay. (Superseded in v2.3.)
 
 **Round 1, also in force**
 - v1 claims that were wrong: "a running job finishes headless as today" (quit sends SIGINT and processing dies; a closed pipe breaks the title rename and the `keep_recording=false` deletion), "`import --title`" (subcommands drop the group flag), "Stop returns to idle immediately" (track merge takes up to 30 s), "Not processed covers failed jobs", "an XCTest target" (no build path).
@@ -34,6 +34,15 @@ Start: Phase 0 (baseline tag), then Phase 1 on branch `ui/phase-1-window-shell`.
 - The inspector auto-opens on transcript, diarization and unnamed labels; a missing summary no longer blocks it.
 - Legacy folder names (`YYYY-MM-DD_HHMM_slug`) are parsed. `busy` and the lock arrive in Phase 2; the `*.tmp.wav` skip arrives in Phase 1.
 - `busy` is true / false / unknown, with `holder_pid`; unknown folders stay out of Not processed but stay in Library and editable (a volume without lock support has only unknown folders). In fallback mode (gate failed) recordings set `OWNSCRIBE_EXCLUSIVE_RECORDING=1`, and exit 75 maps to a visible message. Restore covers the files that have an `.orig`. Notifications are one thread.
+
+**Owner amendments (v2.3, 2026-11-22)**
+- Per-snippet speaker moves are in Phase 2: a single transcript line or a whole turn moves to another speaker, including a new one. The two round-1 objections are answered: segments are named by their index in `show DIR --json`, and a save is refused when the transcript's `revision` changed since it was read; a move does not touch the summary but marks it stale, with Re-summarize offered (never run automatically).
+- One draft per meeting holds renames, merges and moves; it is saved in one `edit-speakers` call.
+- A markdown transcript not in the layout `format_transcript` writes (7 of 83 in the owner's library: older versions and one hand edit) is rewritten in that layout on its first move; the one-time `.orig` copy keeps the original and Restore brings it back. Renames and merges never change the layout.
+- New phase order: Phase 3 is tags and filters plus oMLX summarization (0.18.0), Phase 4 is transcription (plan in `docs/transcription-plan.md`), Phase 5 is the former Phase 3 (parallel processing and import). In the review history above, "Phase 3" and "v0.18.0" mean today's Phase 5.
+- Tags live in each meeting folder; several selected tags show meetings that have any of them.
+- Per-meeting app metadata (stale summary now, tags in Phase 3) lives in `<folder>/.ownscribe.json`.
+- CI runs on macos-15: GitHub retired the macos-14 image on 2 November 2026, so the pre-6.0 compiler branch is no longer built in CI.
 
 ## Current state (verified in code)
 
@@ -96,43 +105,47 @@ Which part lands in which release: see "Scope by phase". The wireframe is the en
 - Tab follows row order; Return commits and moves to the next row; ⌘↩ saves and stays. Typing one name on two labels merges them, stated inline.
 - Drafts: the transcript previews names live. Leaving the meeting saves the draft; Esc discards it. After saving, the button reads "Restore original names" and restores every file that has an `.orig` copy (the CLI keeps a one-time `.orig` of the transcript, and of the summary if one exists when names are first saved). A summary written after naming (a later Retry) keeps the new names, and the inspector says so.
 - Until Phase 2 the existing `SpeakerNamingView` form sits in the detail pane.
-- A turn assigned to the wrong speaker cannot be corrected in this plan; only whole labels can be renamed or merged.
+- Moves (v2.3): each transcript line is its own row inside its turn. Its context menu offers Move Line to ▸ and Move Turn to ▸ with the meeting's speakers and New Speaker…. Moves join the draft: a moved line shows the target's color and a marker, and turns regroup after saving. A save whose `revision` no longer matches the file is refused (exit 65); the app reloads, keeps the names, drops the moves and says so. After a move the Summary tab says "Speakers changed after this summary was written" with Re-summarize (`resume DIR --resummarize`, which keeps the folder name). Before the first move on a transcript not in the standard layout the inspector says that saving tidies the layout and that Restore brings the original back.
 
 **Popover.** Status, Start/Stop, timer, collapsed Options, "Open Ownscribe", last 5 meetings, and (Phase 1) the existing installing / permission-failure / failed-run / running-with-Cancel states. After a run finishes it shows "Ready · Open". Summary and speaker naming leave the popover. Menu-bar icon priority: recording, processing, idle.
 
 **Signals and first run.**
 - Phase 1: when a run finishes nothing takes focus: the menu-bar icon shows an attention dot (cleared when the meeting is opened in the window or popover), the popover shows "Ready · Open", and an open window badges the row (or selects the meeting if nothing is selected).
-- Phase 3: finished jobs post notifications in one thread. A single job reads "Q2 Sales Review ready · 3 speakers to name" and opens the meeting; a batch collapses to "3 meetings ready". A VoiceOver announcement accompanies each.
-- First run keeps the existing install and permission views (full-pane in the window) through Phase 2; Phase 3 replaces them with one checklist (Engine / Screen Recording / Microphone) with download progress, "Open System Settings" and "Quit & Reopen"; Record and Import are disabled with the reason shown.
-- Empty library: a Record button (Phase 1); "Drop audio files here · ⌘O" is added in Phase 3.
+- Phase 5: finished jobs post notifications in one thread. A single job reads "Q2 Sales Review ready · 3 speakers to name" and opens the meeting; a batch collapses to "3 meetings ready". A VoiceOver announcement accompanies each.
+- First run keeps the existing install and permission views (full-pane in the window) through Phase 4; Phase 5 replaces them with one checklist (Engine / Screen Recording / Microphone) with download progress, "Open System Settings" and "Quit & Reopen"; Record and Import are disabled with the reason shown.
+- Empty library: a Record button (Phase 1); "Drop audio files here · ⌘O" is added in Phase 5.
 
-**Keyboard and accessibility.** Menu commands: Record/Stop (Phase 1), Show Inspector ⌥⌘I (Phase 2), Import ⌘O (Phase 3). Reduce Motion is honored for `.symbolEffect(.pulse)` and the drop overlay. Speaker color is never the only identifier. Settings stays a `Window(id:"settings")`; ⌘, via `CommandGroup(replacing: .appSettings)`.
+**Keyboard and accessibility.** Menu commands: Record/Stop (Phase 1), Show Inspector ⌥⌘I (Phase 2), Import ⌘O (Phase 5). Reduce Motion is honored for `.symbolEffect(.pulse)` and the drop overlay. Speaker color is never the only identifier. Settings stays a `Window(id:"settings")`; ⌘, via `CommandGroup(replacing: .appSettings)`.
 
 **Observation.** `@Observable` (macOS 14) for `Engine`, `Recorder`, `Library`, `Jobs`; views that bind use `@Bindable`. Nested `ObservableObject`s would not republish into the `MenuBarExtra` label. `elapsed` and step progress are read only by leaf views so the window does not re-render every second.
 
 ## Scope by phase
 
-| Item | Phase 1 (0.16.0) | Phase 2 (0.17.0) | Phase 3 (0.18.0) |
-|---|---|---|---|
-| Window, sidebar (In progress with the single active run, its step checklist, Cancel and failure message; Library), search, Summary/Transcript, click-to-play, Copy transcript, context menu | yes | | |
-| Window recorder, Stop/Finalizing, slim popover with existing status states, "Ready · Open", attention dot, row badge | yes | | |
-| Degraded mode on the old CLI (failed or deferred upgrade): Record works, plain folder list, no transcript view or speaker editor | yes | | |
-| Empty library with Record button, Settings window + ⌘, | yes | | |
-| `show` / `show --list`, parser fix, `recording_started{folder}`, `meeting_saved`, `*.tmp.wav` skip in `_find_audio` | yes | | |
-| Existing `SpeakerNamingView` in the detail pane | yes | replaced | |
-| Inspector, speaker editor, drafts, merge, Restore, sample playback, ⌥⌘I, `edit-speakers`, per-folder lock, `busy` in `show --list` | | yes | |
-| Queue with several rows, "Queued · N waiting", Cancel on queued rows, step checklist for every row | | | yes |
-| Not processed, Incomplete recording row, failed rows with Retry / Show Log, orphan "Processing" rows | | | yes |
-| Notifications, VoiceOver announcement, quit confirmation | | | yes |
-| Import: window/sidebar/Dock drop, ⌘O, toolbar Import, unsupported-file banner, document types | | | yes |
-| First-run checklist, empty-library drop hint | | | yes |
-| Parallel recording (gate) | | | yes, if the gate passes |
+| Item | Phase 1 (0.16.0) | Phase 2 (0.17.0) | Phase 3 (0.18.0) | Phase 4 (0.19.0) | Phase 5 (0.20.0) |
+|---|---|---|---|---|---|
+| Window, sidebar (In progress with the single active run, its step checklist, Cancel and failure message; Library), search, Summary/Transcript, click-to-play, Copy transcript, context menu | yes | | | | |
+| Window recorder, Stop/Finalizing, slim popover with existing status states, "Ready · Open", attention dot, row badge | yes | | | | |
+| Degraded mode on the old CLI (failed or deferred upgrade): Record works, plain folder list, no transcript view or speaker editor | yes | | | | |
+| Empty library with Record button, Settings window + ⌘, | yes | | | | |
+| `show` / `show --list`, parser fix, `recording_started{folder}`, `meeting_saved`, `*.tmp.wav` skip in `_find_audio` | yes | | | | |
+| Existing `SpeakerNamingView` in the detail pane | yes | replaced | | | |
+| Inspector, speaker editor, drafts, merge, Restore, sample playback, ⌥⌘I, `edit-speakers`, per-folder lock, `busy` in `show --list` | | yes | | | |
+| Per-snippet moves (line, turn, New Speaker), `edit-speakers --assign`, stale-summary flag, `resume --resummarize`, `.ownscribe.json` | | yes | | | |
+| Tags per meeting folder, tag filter (any of the selected), tag autocomplete, deleting a tag from every meeting | | | yes | | |
+| oMLX summarization backend, model picker, config validation | | | yes | | |
+| Transcription through oMLX speech models, per `docs/transcription-plan.md` after its evaluation | | | | yes | |
+| Queue with several rows, "Queued · N waiting", Cancel on queued rows, step checklist for every row | | | | | yes |
+| Not processed, Incomplete recording row, failed rows with Retry / Show Log, orphan "Processing" rows | | | | | yes |
+| Notifications, VoiceOver announcement, quit confirmation | | | | | yes |
+| Import: window/sidebar/Dock drop, ⌘O, toolbar Import, unsupported-file banner, document types | | | | | yes |
+| First-run checklist, empty-library drop hint | | | | | yes |
+| Parallel recording (gate) | | | | | yes, if the gate passes |
 
 ## Parallel processing (record the next meeting while the previous one transcribes)
 
-- **Process model.** One `ownscribe` process per meeting, as today. Recorder: `.recording` → Stop → `.finalizing` → idle on `recording_stopped`. At idle a new recording may start while the previous process transcribes (Phase 3).
+- **Process model.** One `ownscribe` process per meeting, as today. Recorder: `.recording` → Stop → `.finalizing` → idle on `recording_stopped`. At idle a new recording may start while the previous process transcribes (Phase 5).
 - **Locks** (helper module with tests, Python). POSIX record locks via `fcntl`, so a probe uses F_GETLK and never acquires (a `flock` probe would make a concurrent non-blocking take fail with a spurious "busy").
-  - Per-folder `<folder>/.ownscribe.lock`: taken non-blocking, exclusive, right after the folder is claimed (before `recorder.start`) and at the start of `resume` and `edit-speakers` (and `import` once it exists in Phase 3). Held → exit 75 (EX_TEMPFAIL); a process that already claimed a folder removes that empty folder before exiting. The holder writes `{pid, kind, folder}` through its lock descriptor, for display and for the fallback busy test only; it is never used to choose a process to signal.
+  - Per-folder `<folder>/.ownscribe.lock`: taken non-blocking, exclusive, right after the folder is claimed (before `recorder.start`) and at the start of `resume` and `edit-speakers` (and `import` once it exists in Phase 5). Held → exit 75 (EX_TEMPFAIL); a process that already claimed a folder removes that empty folder before exiting. The holder writes `{pid, kind, folder}` through its lock descriptor, for display and for the fallback busy test only; it is never used to choose a process to signal.
   - Global `processing.lock` in the directory that holds `config.toml` (local and stable, so a stable app and a variant, which use different venvs, still serialize; the output directory may be on iCloud or a NAS): blocking, around the processing stage of `_do_transcribe_and_summarize`, `run_summarize` and import. One re-entrant `processing_lock()` context manager in the process. Order is always folder, then global.
   - The lock file is ignored by the empty-folder cleanup (`pipeline.py:159`). A terminal user waiting on the global lock sees one line.
   - Each lock is one open file descriptor per process, kept for the lifetime of the lock. Closing any other descriptor on the file drops a POSIX lock, so a second `open` of the lock file, `Path.write_text` or a temp-and-replace write on it is forbidden. Re-entrancy (both locks) is a counter on that descriptor; the metadata is written through it (truncate and write). Tests use separate processes; thread tests prove nothing here, because threads do not exclude each other.
@@ -148,13 +161,13 @@ Which part lands in which release: see "Scope by phase". The wireframe is the en
   - On quit the app signals only a recording; processing and queued processes keep running. Quit while recording asks first ("Recording in progress. Stop and process?").
 - **Orphans.** After a relaunch a busy folder from an earlier session appears as a "Processing" row ("started by an earlier session"), cancellable by SIGTERM to the pid that F_GETLK reports (`l_pid`), never the pid written in the file, which can be stale; `show --list` carries it as `holder_pid`. Steps are unknown.
 - **"Not processed"** comes from `show --list` status, evaluated on launch and on app activation: audio (found through `output.audio_dir`, ignoring `*.tmp.wav`) and no transcript; or a transcript whose summary is missing while summarization is enabled. Folders with `busy` true or unknown, and the active recording, are excluded. A folder with only `*.tmp.wav` tracks shows as "Incomplete recording" with Reveal in Finder only.
-- **Events.** `recording_started{folder}` and `meeting_saved{folder, summary: ok|failed|unavailable|disabled}` (Phase 1; `meeting_saved` is the last event on every success path: full pipeline, `resume` including summarize-only and "nothing to resume"). `import_started{folder}` and `queued` (Phase 3). The app takes the final folder from the captured stderr at exit, since events and exit arrive on separate hops. `ProgressEvent` in `CommandRunner.swift` gains `folder` and `summary`. Unknown events are already ignored.
+- **Events.** `recording_started{folder}` and `meeting_saved{folder, summary: ok|failed|unavailable|disabled}` (Phase 1; `meeting_saved` is the last event on every success path: full pipeline, `resume` including summarize-only and "nothing to resume"). `import_started{folder}` and `queued` (Phase 5). The app takes the final folder from the captured stderr at exit, since events and exit arrive on separate hops. `ProgressEvent` in `CommandRunner.swift` gains `folder` and `summary`. Unknown events are already ignored.
 - **Atomic writes** (temp file plus `os.replace`) for transcript, summary, config set and speaker edits. `keep_recording=false` deletion also applies in the summarize-only branch. `_get_output_dir`'s final fallback takes a numeric suffix instead of reusing a directory (batch imports start in the same second).
 - **Priority.** No launch-time wrapper for recording processes, because the audio helper inherits their priority. After `recorder.stop()` the process demotes itself (`os.setpriority(PRIO_PROCESS, 0, 10)`); import processes start demoted. The gate decides whether more is needed.
-- **Gate before Phase 3 (needs the Mac and real audio; no new code).** With today's CLI, record 10+ minutes while a long file is transcribed with `large-v3` and diarization on. Compare the `.sys` and `.mic` track durations and the final WAV with wall-clock time. Contention is also on the GPU (diarization on MPS, llama.cpp on Metal versus ScreenCaptureKit), which a thread cap does not cover. If audio drops, decide the mitigation (a per-job thread cap flag or env var; `transcription.threads` exists only as global config). If there is none, v0.18.0 ships without parallel recording: recording stays blocked while a job runs, everything else in Phase 3 ships. In that mode the app sets `OWNSCRIBE_EXCLUSIVE_RECORDING=1` for recordings, and the recording process takes the global lock when capture starts (non-blocking; held → exit 75, after removing the empty folder it claimed). The app maps exit 75 on Record to "Another ownscribe job is still processing" and shows the busy row. A drop, ⌘O or Retry started during a recording queues behind it and shows "Queued · waits for the recording".
+- **Gate before Phase 5 (needs the Mac and real audio; no new code).** With today's CLI, record 10+ minutes while a long file is transcribed with `large-v3` and diarization on. Compare the `.sys` and `.mic` track durations and the final WAV with wall-clock time. Contention is also on the GPU (diarization on MPS, llama.cpp on Metal versus ScreenCaptureKit), which a thread cap does not cover. If audio drops, decide the mitigation (a per-job thread cap flag or env var; `transcription.threads` exists only as global config). If there is none, the Phase 5 release ships without parallel recording: recording stays blocked while a job runs, everything else in Phase 5 ships. In that mode the app sets `OWNSCRIBE_EXCLUSIVE_RECORDING=1` for recordings, and the recording process takes the global lock when capture starts (non-blocking; held → exit 75, after removing the empty folder it claimed). The app maps exit 75 on Record to "Another ownscribe job is still processing" and shows the busy row. A drop, ⌘O or Retry started during a recording queues behind it and shows "Queued · waits for the recording".
 - **Install gate and degraded mode.** The app never reinstalls while any process runs from the managed venv, matched on the command line (`<venv>/bin/ownscribe` in argv, which also sees orphans; the venv's `bin/python` is a symlink, so the executable path is not reliable). When an upgrade fails, or is deferred because a job is still running, the app runs in degraded mode on the old CLI with the banner "Update failed · Retry" or "Update pending · waiting for running jobs". Record keeps working (as today), the Library is the plain folder list from the existing `MeetingLoader`, completion falls back to the newest folder, and the transcript view and speaker editor are off. A test with a bad ref confirms the old CLI is left runnable (unverified).
 
-## Drag-and-drop import (Phase 3)
+## Drag-and-drop import (Phase 5)
 
 - **Targets:** the window (full-pane drop overlay), the sidebar, the Dock icon / app icon in Finder, ⌘O, the toolbar Import button. Not the popover: a `MenuBarExtra` panel dismisses when the user clicks Finder to start the drag.
 - **Flow:** a drop starts the job at once with current defaults; the row shows "call.m4a · base · Auto" read-only with Cancel. ⌥-drop opens an options sheet first. Unsupported files get a non-modal banner naming them. The finished meeting appears in Library with a badge.
@@ -177,20 +190,29 @@ Which part lands in which release: see "Scope by phase". The wireframe is the en
   - `_find_audio` skips `*.tmp.wav` (used by `show` and the Not processed rule).
 - **Phase 2:**
   - Lock helper with the per-folder lock (see Parallel processing); `resume`, the pipeline and `edit-speakers` take it; busy exits 75; `show --list` gains `busy: true|false|unknown` and `holder_pid` (F_GETLK probe). Cross-process tests, including one-descriptor and re-entrancy cases.
-  - `ownscribe edit-speakers DIR --map A=B ... [--revert]`: one regex pass with alternation sorted longest first, `(?<!\w)…(?!\w)` boundaries and a callable replacement (handles SPEAKER_1 vs SPEAKER_10, backslashes, `$`, swaps); patches transcript and summary, `.md` and `.json` when both exist (for `summary.json` it edits the `summary` value); atomic; one-time `.orig` copies of both files; rejects `*` in names; two labels mapped to one name merge; takes the folder lock.
-- **Phase 3:**
+  - `ownscribe edit-speakers DIR --map A=B ... [--revert]`: one regex pass with alternation sorted longest first, `(?<!\w)…(?!\w)` boundaries and a callable replacement (handles SPEAKER_1 vs SPEAKER_10, backslashes, `$`, swaps); patches transcript and summary, `.md` and `.json` when both exist (for `summary.json` it edits the `summary` value); atomic; one-time `.orig` copies of both files; rejects `*` in names; two labels mapped to one name merge; takes the folder lock. In the transcript only speaker labels change (markdown headers, JSON `speaker` fields), never spoken text. v2.3 also rejects `[`, `]`, line breaks and a `Language:`/`Duration:` prefix, which break markdown headers.
+  - v2.3: `edit-speakers --assign INDEX=NAME ... --revision SHA`: assignments first (targets are current labels or new names), then `--map`; a changed `revision` exits 65; exactly one transcript file; markdown is written again by `format_transcript`, JSON is edited in its raw document (segment and words). A changed speaker sets `summary_stale` in `.ownscribe.json` when a summary exists; `--revert` clears it.
+  - v2.3: `show DIR --json` gains `revision` (sha256 of the transcript file), `standard_layout`, and `turns[].segments[{index, start, end, text}]`; `status` gains `summary_stale`; `show --list` rows gain `speakers` (labels, for name autocomplete).
+  - v2.3: `ownscribe resume DIR --resummarize`: writes the summary again from the current transcript, keeps the folder name, clears `summary_stale`, emits events and `meeting_saved`, takes the folder lock. Every summary write clears the flag.
+- **Phase 3 (v2.3):**
+  - Tags in `.ownscribe.json`: trimmed, non-empty, no line breaks, compared case-insensitively (a new tag takes the spelling already used in the library). `ownscribe tag DIR --add T --remove T`, `ownscribe tags --json` (all tags with counts), `ownscribe tags --delete T` (from every meeting; refuses and lists busy folders). Folder lock and atomic writes. `show --list` rows and `show DIR` gain `tags`.
+  - Summarization backend `omlx` on the existing OpenAI-compatible summarizer: default host `http://127.0.0.1:8000/v1`, model required, models listed from `/v1/models`, a clear error when the server is not running. Unknown backend values, and a `local` backend whose model is not a GGUF or a known name, fail with a message.
+- **Phase 4 (v2.3):** see `docs/transcription-plan.md`.
+- **Phase 5 (the former Phase 3):**
   - Global lock, `queued`, `import_started`, `OWNSCRIBE_EXCLUSIVE_RECORDING` (fallback mode), tolerant writers, opt-in stdin control, demotion after `recorder.stop()`, `import`, numeric-suffix directory fallback, `--title` and `--language` plumbing for subcommands (`is not None` in `resume`), `import` takes the folder lock, atomic writes and `keep_recording` in the summarize-only branch, `FakeRecorder` moved to `conftest.py`.
 - Every phase: tests in `tests/`, README sync for new commands (AGENTS.md requires it).
 - **Swift, Phase 1:** `OwnscribeCLI.install` uses `--reinstall-package ownscribe`; a development override, the `defaults` key `OWNSCRIBE_CLI_SPEC` of a variant build (`defaults write <variant bundle id> OWNSCRIBE_CLI_SPEC <pip spec or path>`; an environment variable would not survive `open`, which `build-app.sh --run` uses), replaces the git spec. The stable build ignores it, and the install stamps the spec it actually installed, so removing the key triggers a normal upgrade. It lets an unreleased CLI be tried before its tag exists (noted in `macapp/README.md`).
 
 ## Phases
 
-0. **Baseline.** Tag `99e220e` as `macapp-v0.15.4` (see Releases). The capture-gap test can run any time before Phase 3.
-1. **Window shell + `show` + events.** Per "Scope by phase". Spike first: the main window must not open at launch (macOS 15+ `.defaultLaunchBehavior(.suppressed)`, macOS 14 fallback untested). Failed-upgrade test. Release `macapp-v0.16.0`, `macappRelease` = `macapp-v0.16.0`.
-2. **Speaker editor + `edit-speakers` + folder lock.** Release `macapp-v0.17.0`.
-3. **Parallel processing + import.** After the gate. Release `macapp-v0.18.0`.
+0. **Baseline.** Tag `99e220e` as `macapp-v0.15.4` (see Releases). The capture-gap test can run any time before Phase 5. Done.
+1. **Window shell + `show` + events.** Per "Scope by phase". Spike first: the main window must not open at launch (macOS 15+ `.defaultLaunchBehavior(.suppressed)`, macOS 14 fallback untested). Failed-upgrade test. Release `macapp-v0.16.0`, `macappRelease` = `macapp-v0.16.0`. Done.
+2. **Speaker editor + `edit-speakers` (renames, merges, per-snippet moves) + folder lock.** Release `macapp-v0.17.0`.
+3. **Tags and filters + oMLX summarization.** Release `macapp-v0.18.0`.
+4. **Transcription**, per `docs/transcription-plan.md` once its evaluation is done and the owner approves. Release `macapp-v0.19.0`.
+5. **Parallel processing + import.** After the gate. Release `macapp-v0.20.0`.
 
-Order is 1, 2, 3. Phase 3 needs the Phase 1 shell and the lock helper, so it may ship before Phase 2 only on the owner's say-so, in which case the lock helper, including the `busy` probe in `show --list`, ships with it and tags follow shipping order. Each phase ends buildable and usable.
+Order is 2, 3, 4, 5. Phase 5 needs the Phase 1 shell and the lock helper, so it may ship earlier only on the owner's say-so, in which case the lock helper, including the `busy` probe in `show --list`, ships with it and tags follow shipping order. Each phase ends buildable and usable, and starts with a detailed execution plan the owner approves.
 
 ## Git and releases
 
@@ -202,7 +224,7 @@ Order is 1, 2, 3. Phase 3 needs the Phase 1 shell and the lock helper, so it may
 **Releases**
 - Every release is an annotated tag `macapp-vX.Y.Z` equal to the app version (`MARKETING_VERSION` in `project.yml`, `CFBundleShortVersionString` in `build-app.sh`). Tag message follows the existing ones: `macapp X.Y.Z on ownscribe <pyproject version>`, then what changed.
 - Baseline: tag `99e220e` as `macapp-v0.15.4` before any work.
-- Each of v0.16.0, v0.17.0 and v0.18.0 carries Python changes, so each bumps `macappRelease` to its own tag in the same commit as the version bump.
+- Every planned release carries Python changes, so each bumps `macappRelease` to its own tag in the same commit as the version bump.
 - Sequence for a release: version-bump commit on the phase branch → open a pull request to `main` (CI runs only on pushes and pull requests to `main`) → wait until lint, test and both `macapp` runners are green → tag the pull request's head commit → push only the tag and confirm it on `origin` → fast-forward `main` to that commit and push. The tag is on `origin` before any build that names it, and no tag is pushed before CI has passed. A development build runs an unreleased CLI through the `OWNSCRIBE_CLI_SPEC` defaults key.
 - A pushed tag is never moved or deleted (`needsUpgrade` relies on it). A bad release is superseded by the next patch tag.
 - Plain tags only, no GitHub Release: `publish.yml` (PyPI) and `build-binary.yml` (audio helper) trigger on `release: published`.
@@ -219,4 +241,4 @@ Order is 1, 2, 3. Phase 3 needs the Phase 1 shell and the lock helper, so it may
 - Dock icon only while a window is open.
 - One processing job at a time; recording never blocked (if the gate passes).
 - One branch per phase; `main` receives phases by fast-forward after the release sequence above.
-- Not planned: per-turn speaker reassignment, in-transcript find, transcript-text search, an automatic recovery of `*.tmp.wav` recordings, a Dock "Always/Never" setting, theming, word-level transcript editing, export formats beyond Copy/Reveal, global hotkey, multi-window.
+- Not planned: in-transcript find, transcript-text search, an automatic recovery of `*.tmp.wav` recordings, a Dock "Always/Never" setting, theming, word-level transcript editing, export formats beyond Copy/Reveal, global hotkey, multi-window.

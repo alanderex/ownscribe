@@ -9,8 +9,44 @@ struct MeetingDocument: Decodable, Equatable {
         let start: Double
         let end: Double
         let text: String
+        /// The turn's lines, each numbered as `edit-speakers --assign` names it.
+        let segments: [Segment]
 
         var id: Int { ordinal }
+
+        enum CodingKeys: String, CodingKey {
+            case ordinal, speaker, start, end, text, segments
+        }
+
+        init(ordinal: Int, speaker: String?, start: Double, end: Double, text: String, segments: [Segment] = []) {
+            self.ordinal = ordinal
+            self.speaker = speaker
+            self.start = start
+            self.end = end
+            self.text = text
+            self.segments = segments
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            ordinal = try c.decode(Int.self, forKey: .ordinal)
+            speaker = try c.decodeIfPresent(String.self, forKey: .speaker)
+            start = try c.decode(Double.self, forKey: .start)
+            end = try c.decode(Double.self, forKey: .end)
+            text = try c.decode(String.self, forKey: .text)
+            segments = try c.decodeIfPresent([Segment].self, forKey: .segments) ?? []
+        }
+    }
+
+    /// One timestamped line of a turn.
+    struct Segment: Decodable, Identifiable, Equatable {
+        /// The segment's index in the transcript; what a line move names.
+        let index: Int
+        let start: Double
+        let end: Double
+        let text: String
+
+        var id: Int { index }
     }
 
     struct Speaker: Decodable, Equatable {
@@ -30,9 +66,19 @@ struct MeetingDocument: Decodable, Equatable {
     let title: String
     let language: String?
     let duration: Double?
+    /// sha256 of the transcript file; a line move passes it back so it never applies
+    /// to a transcript that changed since.
+    let revision: String?
+    /// False when a line move would also rewrite the transcript's layout.
+    let standardLayout: Bool?
     let turns: [Turn]
     let speakers: [Speaker]
     let status: LibraryRow.Status
+
+    enum CodingKeys: String, CodingKey {
+        case schema, title, language, duration, revision, turns, speakers, status
+        case standardLayout = "standard_layout"
+    }
 
     static func decode(_ data: Data) throws -> MeetingDocument {
         let document = try JSONDecoder().decode(MeetingDocument.self, from: data)

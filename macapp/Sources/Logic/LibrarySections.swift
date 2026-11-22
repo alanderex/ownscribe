@@ -41,10 +41,13 @@ struct LibraryCalendar {
     }
 
     /// Meetings grouped by day, newest day first, newest first within a day.
-    /// `excluding` holds folder paths a running job still owns.
+    /// `excluding` holds folder paths a running job of this app owns. A folder whose
+    /// lock another process holds (a job from an earlier session, a terminal run) is
+    /// left out too; one whose lock state is unknown stays, since on a volume without
+    /// lock support every folder is unknown.
     func sections(_ rows: [LibraryRow], excluding: Set<String> = []) -> [DaySection] {
         var byDay: [Date: [LibraryRow]] = [:]
-        for row in rows where row.isMeeting && !excluding.contains(row.path) {
+        for row in rows where row.isMeeting && !excluding.contains(row.path) && row.status.busy != .busy {
             byDay[day(of: row) ?? .distantPast, default: []].append(row)
         }
         return byDay.keys.sorted(by: >).map { day in

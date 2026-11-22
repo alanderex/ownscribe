@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -14,6 +15,7 @@ from click.testing import CliRunner
 
 from ownscribe.cli import cli
 from ownscribe.config import Config
+from ownscribe.locks import LOCK_NAME
 from ownscribe.output.json_output import format_summary_json, format_transcript_json
 from ownscribe.output.markdown import format_summary, format_transcript
 from ownscribe.show import build_turns, folder_day, folder_title, meeting_detail, meeting_rows, speaker_stats
@@ -168,6 +170,7 @@ class TestMeetingDetail:
             "start": 8.0,
             "end": 10.0,
             "text": "Sounds good.",
+            "segments": [{"index": 3, "start": 8.0, "end": 10.0, "text": "Sounds good."}],
         }
         assert [s["label"] for s in detail["speakers"]] == ["SPEAKER_00", "SPEAKER_01"]
         assert detail["status"] == {
@@ -175,7 +178,40 @@ class TestMeetingDetail:
             "summary": "present",
             "audio": str(folder / "recording.wav"),
             "orig": False,
+            "busy": False,
+            "holder_pid": None,
+            "summary_stale": False,
         }
+        assert detail["revision"] == hashlib.sha256((folder / "transcript.md").read_bytes()).hexdigest()
+        assert detail["standard_layout"] is True
+
+    def test_each_turn_lists_its_lines_by_segment_index(self, config, meeting):
+        folder = _folder(config)
+        (folder / "transcript.md").write_text(format_transcript(meeting))
+
+        first = meeting_detail(config, folder)["turns"][0]
+
+        assert first["segments"] == [
+            {"index": 0, "start": 0.0, "end": 2.0, "text": "Welcome everyone."},
+            {"index": 1, "start": 2.0, "end": 5.0, "text": "Today is about the budget."},
+            {"index": 2, "start": 5.0, "end": 8.0, "text": "And the hiring plan."},
+        ]
+
+    def test_an_older_layout_is_reported(self, config, meeting):
+        folder = _folder(config)
+        # Two headers in a row for one speaker, as a merge with rename-speakers leaves it.
+        text = format_transcript(meeting).replace("**SPEAKER_01**", "**SPEAKER_00**")
+        (folder / "transcript.md").write_text(text)
+
+        assert meeting_detail(config, folder)["standard_layout"] is False
+
+    def test_a_folder_without_a_transcript_has_no_revision(self, config):
+        folder = _folder(config)
+
+        detail = meeting_detail(config, folder)
+
+        assert detail["revision"] is None
+        assert detail["standard_layout"] is None
 
     def test_json_wins_over_markdown(self, config, meeting):
         folder = _folder(config)
@@ -235,6 +271,32 @@ class TestMeetingDetail:
 
         assert meeting_detail(config, folder)["status"]["audio"] is None
 
+    @pytest.mark.macos
+    def test_a_folder_another_process_works_on_is_busy(self, config, hold_folder_lock):
+        folder = _folder(config)
+
+        with hold_folder_lock(folder) as holder:
+            status = meeting_detail(config, folder)["status"]
+            [row] = meeting_rows(config)["meetings"]
+
+        assert status["busy"] is True
+        assert status["holder_pid"] == holder.pid
+        assert row["status"]["busy"] is True
+        assert meeting_detail(config, folder)["status"]["busy"] is False
+
+    def test_an_unreadable_lock_is_unknown(self, config):
+        folder = _folder(config)
+        lock_file = folder / LOCK_NAME
+        lock_file.write_text("{}")
+        lock_file.chmod(0)
+        try:
+            status = meeting_detail(config, folder)["status"]
+        finally:
+            lock_file.chmod(0o600)
+
+        assert status["busy"] == "unknown"
+        assert status["holder_pid"] is None
+
 
 class TestMeetingRows:
     def test_one_row_per_meeting_folder(self, config, meeting):
@@ -293,7 +355,7 @@ class TestMeetingRows:
         ],
     )
     def test_speaker_count_matches_the_detail_view(self, config, segments, expected):
-        """The row counts speakers without building turns; it must agree with `show DIR`."""
+        """The row names speakers without building turns; it must agree with `show DIR`."""
         folder = _folder(config, "260103-sync")
         (folder / "transcript.json").write_text(
             format_transcript_json(TranscriptResult(segments=segments, language="en", duration=3.0))
@@ -302,7 +364,8 @@ class TestMeetingRows:
         [row] = meeting_rows(config)["meetings"]
 
         assert row["speaker_count"] == expected
-        assert row["speaker_count"] == len(meeting_detail(config, folder)["speakers"])
+        assert row["speakers"] == [s["label"] for s in meeting_detail(config, folder)["speakers"]]
+        assert row["speaker_count"] == len(row["speakers"])
 
     def test_missing_output_dir_is_an_empty_library(self, config):
         assert meeting_rows(config) == {"schema": 1, "meetings": []}
@@ -354,6 +417,7 @@ import ownscribe.config as cfg
 cfg.CONFIG_PATH = Path({str(config_file)!r})
 from click.testing import CliRunner
 from ownscribe.cli import cli
+from ownscribe.locks import LOCK_NAME
 result = CliRunner().invoke(cli, ["show", "--list", "--json"])
 assert result.exit_code == 0, result.output
 heavy = {{"torch", "whisperx", "pyannote", "llama_cpp", "openai", "ollama"}}

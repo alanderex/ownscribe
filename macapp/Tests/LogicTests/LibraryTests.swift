@@ -38,6 +38,31 @@ final class LibraryTests: XCTestCase {
         XCTAssertFalse(rows[0].status.hasSummary)
     }
 
+    func testDecodesSpeakerNamesAndBusyFolders() throws {
+        let json = #"""
+        {"schema": 1, "meetings": [{"path": "/n/a", "name_day": null, "created": null, "title": "A",
+          "duration": null, "speaker_count": 2, "speakers": ["Anna", "SPEAKER_01"],
+          "status": {"transcript": "present", "summary": "present", "audio": null, "orig": false,
+                     "busy": true, "holder_pid": 4711, "summary_stale": false}}]}
+        """#
+        let rows = try LibraryListing.decode(Data(json.utf8))
+        XCTAssertEqual(rows[0].speakers, ["Anna", "SPEAKER_01"])
+        XCTAssertEqual(rows[0].status.busy, .busy)
+        XCTAssertEqual(rows[0].status.holderPid, 4711)
+    }
+
+    func testSpeakerNamesAreTheNamedSpeakersOfTheWholeLibrary() {
+        func meeting(_ speakers: [String]) -> LibraryRow {
+            LibraryRow(
+                path: "/n/\(speakers.joined())", nameDay: nil, created: nil, title: "T", duration: nil,
+                speakerCount: speakers.count, speakers: speakers,
+                status: .init(transcript: "present", summary: "present", audio: nil, orig: false)
+            )
+        }
+        let rows = [meeting(["Ben", "SPEAKER_00"]), meeting(["anna", "Ben", "Unknown"]), meeting([])]
+        XCTAssertEqual(LibraryRow.speakerNames(in: rows), ["anna", "Ben"])
+    }
+
     func testRefusesAnUnknownSchema() {
         let json = #"{"schema": 2, "meetings": []}"#
         XCTAssertThrowsError(try LibraryListing.decode(Data(json.utf8))) { error in
@@ -85,6 +110,18 @@ final class LibraryTests: XCTestCase {
         ]
         let sections = berlin.sections(rows, excluding: ["/n/running"])
         XCTAssertEqual(Set(sections.flatMap { $0.rows.map(\.title) }), ["done", "summary-only"])
+    }
+
+    func testSectionsLeaveOutBusyFoldersButNotUnknownOnes() {
+        func meeting(_ name: String, _ busy: LibraryRow.Status.Busy) -> LibraryRow {
+            LibraryRow(
+                path: "/n/\(name)", nameDay: "2026-11-20", created: nil, title: name, duration: nil,
+                speakerCount: 0,
+                status: .init(transcript: "present", summary: "present", audio: nil, orig: false, busy: busy)
+            )
+        }
+        let rows = [meeting("free", .free), meeting("held", .busy), meeting("no-locks", .unknown)]
+        XCTAssertEqual(Set(berlin.sections(rows).flatMap { $0.rows.map(\.title) }), ["free", "no-locks"])
     }
 
     func testUndatedRowsGoLast() {
