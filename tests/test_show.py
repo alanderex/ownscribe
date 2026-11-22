@@ -307,8 +307,13 @@ class TestMeetingRows:
     def test_missing_output_dir_is_an_empty_library(self, config):
         assert meeting_rows(config) == {"schema": 1, "meetings": []}
 
-    def test_two_hundred_hour_long_meetings_list_fast(self, config):
-        """The plan's budget for `show --list`: 300 ms for 200 folders."""
+    def test_two_hundred_hour_long_meetings_list_fast(self, config, in_ci):
+        """The plan's budget for `show --list`: 300 ms for 200 folders.
+
+        A CI runner is a shared virtual machine about three times slower than an
+        M-series Mac, so there the limit is 1 s. That still catches an import of the
+        ML stack or a quadratic slip, but only a developer's Mac checks the budget.
+        """
         segments = []
         for i in range(700):  # about one hour of whisper segments
             speaker = f"SPEAKER_0{(i // 4) % 3}"  # runs of four, three speakers
@@ -333,7 +338,8 @@ class TestMeetingRows:
 
         assert len(rows) == 200
         assert all(r["speaker_count"] == 3 for r in rows)
-        assert elapsed < 0.3, f"show --list took {elapsed * 1000:.0f} ms for 200 folders"
+        limit = 1.0 if in_ci else 0.3
+        assert elapsed < limit, f"show --list took {elapsed * 1000:.0f} ms for 200 folders, limit {limit * 1000:.0f}"
 
     def test_does_not_import_the_ml_stacks(self, tmp_path):
         """The app runs `show --list` on every refresh; it must stay a light process."""

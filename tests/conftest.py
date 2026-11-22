@@ -80,9 +80,19 @@ def synthetic_wav() -> Path:
     Path(path).unlink(missing_ok=True)
 
 
+def _running_in_ci() -> bool:
+    return os.environ.get("CI", "").lower() in ("true", "1", "yes")
+
+
+@pytest.fixture
+def in_ci() -> bool:
+    """True on a CI runner, a shared virtual machine slower than a developer's Mac."""
+    return _running_in_ci()
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Auto-skip tests based on platform and environment."""
-    in_ci = os.environ.get("CI", "").lower() in ("true", "1", "yes")
+    in_ci = _running_in_ci()
 
     for item in items:
         if "hardware" in item.keywords and in_ci:
