@@ -269,6 +269,9 @@ struct MeetingDetailView: View {
     @ViewBuilder
     private var summaryBody: some View {
         if let summary {
+            if !engine.isDegraded, document?.status.summaryStale ?? row.status.summaryStale {
+                staleSummaryBanner
+            }
             RenderedMarkdown(text: summary, style: .document)
                 .textSelection(.enabled)
         } else if loadedPath == row.path {
@@ -279,6 +282,25 @@ struct MeetingDetailView: View {
         } else {
             ProgressView().controlSize(.small)
         }
+    }
+
+    /// A summary written before speakers were moved may credit the wrong person.
+    private var staleSummaryBanner: some View {
+        HStack(spacing: 10) {
+            Label("Speakers changed after this summary was written.", systemImage: "exclamationmark.bubble")
+            Spacer()
+            if jobs.ownedFolder == row.path {
+                ProgressView().controlSize(.small)
+                Text("Summarizing…").foregroundStyle(.secondary)
+            } else {
+                Button("Re-summarize") { jobs.resummarize(folder: row.path) }
+                    .disabled(jobs.isRunning || row.status.busy == .busy)
+                    .help(jobs.isRunning ? "Available when the current recording or job is done." : "")
+            }
+        }
+        .font(.callout)
+        .padding(10)
+        .background(.yellow.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder

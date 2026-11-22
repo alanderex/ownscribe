@@ -61,6 +61,15 @@ final class Jobs {
     /// dropping its process handle (so Stop could no longer signal it) and flipping
     /// the app to failed while capture continued headless.
     @ObservationIgnored private var runToken = 0
+    /// What the current run is, for how it ends.
+    @ObservationIgnored private var kind: Kind = .recording
+
+    private enum Kind {
+        /// Record, transcribe, summarize: a new meeting the user has not seen.
+        case recording
+        /// Write an existing meeting's summary again; the user is looking at it.
+        case resummarizing
+    }
 
     init(engine: Engine, library: Library) {
         self.engine = engine
@@ -83,15 +92,27 @@ final class Jobs {
 
     /// Start the record → transcribe → summarize process.
     func launchRecording(flags: [String]) {
+        launch(arguments: flags, kind: .recording, folder: nil)
+    }
+
+    /// Write a meeting's summary again from its transcript, after speakers were moved
+    /// (`resume DIR --resummarize`). The folder counts as owned until it is done.
+    func resummarize(folder: String) {
+        guard state != .running else { return }
+        launch(arguments: ["resume", folder, "--resummarize"], kind: .resummarizing, folder: folder)
+    }
+
+    private func launch(arguments: [String], kind: Kind, folder: String?) {
         steps = []
         activeStepKey = nil
         autoStopped = false
-        ownedFolder = nil
+        ownedFolder = folder
+        self.kind = kind
         state = .running
         runToken &+= 1
         let token = runToken
         running = engine.cli.launchPipeline(
-            flags: flags,
+            flags: arguments,
             onEvent: { [weak self] event in
                 Task { @MainActor in self?.handleProgressEvent(token, event) }
             }
@@ -181,8 +202,16 @@ final class Jobs {
         defer { onRunEnded?() }
 
         guard result.ok else {
+            let what = kind == .recording ? "Recording" : "Summarizing"
             state = .failed(FailureText.firstMeaningfulLine(result.stderr)
-                ?? "Recording failed (exit \(result.exitCode)).")
+                ?? "\(what) failed (exit \(result.exitCode)).")
+            return
+        }
+        // The user asked for this summary on the meeting in front of them: no badge,
+        // no change of selection, only the new summary.
+        guard kind == .recording else {
+            state = .idle
+            library.refresh()
             return
         }
 
