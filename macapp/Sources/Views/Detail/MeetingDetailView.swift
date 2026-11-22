@@ -30,6 +30,7 @@ struct MeetingDetailView: View {
     /// Lines waiting for a name typed for "New Speaker…".
     @State private var newSpeakerLines: [Int]?
     @State private var newSpeakerName = ""
+    @State private var showsSummarize = false
 
     var body: some View {
         // The header, the tags and the tab row stay in view; only the summary or the
@@ -105,6 +106,22 @@ struct MeetingDetailView: View {
         .onDisappear {
             player.stop()
             saveInBackground(row.path)
+        }
+        .onChange(of: jobs.ownedFolder) { previous, current in
+            // A summary run on this meeting ended: show what it wrote. The row may look
+            // the same before and after, so the reload cannot wait for it to change.
+            if previous == row.path, current == nil {
+                Task { await load() }
+            }
+        }
+        .sheet(isPresented: $showsSummarize) {
+            SummarizeSheet(
+                meetingTitle: row.title, hasSummary: row.status.hasSummary,
+                request: initialSummaryRequest
+            ) { request in
+                chosenTab = .summary
+                jobs.resummarize(folder: row.path, request: request)
+            }
         }
         .alert("New Speaker", isPresented: newSpeakerPrompt) {
             TextField("Name", text: $newSpeakerName)
@@ -273,6 +290,7 @@ struct MeetingDetailView: View {
             .labelsHidden()
             .fixedSize()
             Spacer()
+            summarizeButton
             if tab == .transcript, player.playingLine != nil {
                 Button {
                     player.stop()
@@ -289,6 +307,37 @@ struct MeetingDetailView: View {
                 }
             }
         }
+    }
+
+    /// Writes the summary with instructions, a template and a model (SummarizeSheet).
+    /// Needs a transcript, and a CLI new enough to take instructions.
+    @ViewBuilder
+    private var summarizeButton: some View {
+        if !engine.isDegraded, row.status.hasTranscript {
+            if jobs.ownedFolder == row.path {
+                ProgressView().controlSize(.small)
+                Text("Summarizing…").foregroundStyle(.secondary)
+            } else {
+                Button {
+                    showsSummarize = true
+                } label: {
+                    Label(row.status.hasSummary ? "Re-summarize…" : "Summarize…", systemImage: "text.badge.star")
+                }
+                .disabled(jobs.isRunning || isProcessing)
+                .help(jobs.isRunning || isProcessing
+                      ? "Available when the current recording or job is done."
+                      : "Write the summary with your own instructions, template and model")
+            }
+        }
+    }
+
+    /// The meeting's last request, else Settings' backend, model and template.
+    private var initialSummaryRequest: SummaryRequest {
+        let settings = engine.config.summarization
+        return SummaryRequest.initial(
+            recorded: document?.summaryRequest, backend: settings.backend,
+            model: settings.model, template: settings.template
+        )
     }
 
     @ViewBuilder
@@ -318,8 +367,8 @@ struct MeetingDetailView: View {
                 ProgressView().controlSize(.small)
                 Text("Summarizing…").foregroundStyle(.secondary)
             } else {
-                Button("Re-summarize") { jobs.resummarize(folder: row.path) }
-                    .disabled(jobs.isRunning || row.status.busy == .busy)
+                Button("Re-summarize…") { showsSummarize = true }
+                    .disabled(jobs.isRunning || isProcessing)
                     .help(jobs.isRunning ? "Available when the current recording or job is done." : "")
             }
         }

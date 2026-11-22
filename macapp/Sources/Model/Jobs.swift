@@ -95,11 +95,12 @@ final class Jobs {
         launch(arguments: flags, kind: .recording, folder: nil)
     }
 
-    /// Write a meeting's summary again from its transcript, after speakers were moved
-    /// (`resume DIR --resummarize`). The folder counts as owned until it is done.
-    func resummarize(folder: String) {
+    /// Write a meeting's summary (again) from its transcript with the template, model
+    /// and instructions in `request` (`resume DIR --resummarize`). The folder counts as
+    /// owned until it is done.
+    func resummarize(folder: String, request: SummaryRequest) {
         guard state != .running else { return }
-        launch(arguments: ["resume", folder, "--resummarize"], kind: .resummarizing, folder: folder)
+        launch(arguments: request.resumeArguments(folder: folder), kind: .resummarizing, folder: folder)
     }
 
     private func launch(arguments: [String], kind: Kind, folder: String?) {

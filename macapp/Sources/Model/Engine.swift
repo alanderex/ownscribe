@@ -76,7 +76,10 @@ final class Engine {
         ("Auto", "auto"), ("German", "de"), ("English", "en"),
         ("French", "fr"), ("Spanish", "es"),
     ]
-    let availableTemplates = ["meeting", "lecture", "brief"]
+    /// The built-in summary templates and the custom ones from config.toml.
+    var availableTemplates: [String] {
+        SummaryRequest.templates(custom: config.templates.map { Array($0.keys) } ?? [])
+    }
 
     let cli = OwnscribeCLI()
     /// Called after every successful config load: at setup, and after a Settings
