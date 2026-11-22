@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -169,6 +170,7 @@ class TestMeetingDetail:
             "start": 8.0,
             "end": 10.0,
             "text": "Sounds good.",
+            "segments": [{"index": 3, "start": 8.0, "end": 10.0, "text": "Sounds good."}],
         }
         assert [s["label"] for s in detail["speakers"]] == ["SPEAKER_00", "SPEAKER_01"]
         assert detail["status"] == {
@@ -178,7 +180,38 @@ class TestMeetingDetail:
             "orig": False,
             "busy": False,
             "holder_pid": None,
+            "summary_stale": False,
         }
+        assert detail["revision"] == hashlib.sha256((folder / "transcript.md").read_bytes()).hexdigest()
+        assert detail["standard_layout"] is True
+
+    def test_each_turn_lists_its_lines_by_segment_index(self, config, meeting):
+        folder = _folder(config)
+        (folder / "transcript.md").write_text(format_transcript(meeting))
+
+        first = meeting_detail(config, folder)["turns"][0]
+
+        assert first["segments"] == [
+            {"index": 0, "start": 0.0, "end": 2.0, "text": "Welcome everyone."},
+            {"index": 1, "start": 2.0, "end": 5.0, "text": "Today is about the budget."},
+            {"index": 2, "start": 5.0, "end": 8.0, "text": "And the hiring plan."},
+        ]
+
+    def test_an_older_layout_is_reported(self, config, meeting):
+        folder = _folder(config)
+        # Two headers in a row for one speaker, as a merge with rename-speakers leaves it.
+        text = format_transcript(meeting).replace("**SPEAKER_01**", "**SPEAKER_00**")
+        (folder / "transcript.md").write_text(text)
+
+        assert meeting_detail(config, folder)["standard_layout"] is False
+
+    def test_a_folder_without_a_transcript_has_no_revision(self, config):
+        folder = _folder(config)
+
+        detail = meeting_detail(config, folder)
+
+        assert detail["revision"] is None
+        assert detail["standard_layout"] is None
 
     def test_json_wins_over_markdown(self, config, meeting):
         folder = _folder(config)

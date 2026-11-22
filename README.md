@@ -202,6 +202,7 @@ ownscribe list-speakers transcript.md                       # list diarized spea
 ownscribe rename-speakers transcript.md --map SPEAKER_00=Anna # name speakers in a transcript
 ownscribe edit-speakers ./260220-1736 --map SPEAKER_00=Anna  # rename or merge speakers in transcript + summary
 ownscribe edit-speakers ./260220-1736 --revert              # undo every speaker edit in that folder
+ownscribe edit-speakers ./260220-1736 --assign 42=Anna --revision <rev>  # move one transcript line to Anna
 ownscribe config                   # open config file in $EDITOR
 ownscribe config get               # print effective config as JSON
 ownscribe config set summarization.backend openai           # set a value (keeps comments)
@@ -336,7 +337,11 @@ ownscribe edit-speakers ./260220-1736 \
     --map SPEAKER_00=Anna --map SPEAKER_01=Bob                 # name speakers in transcript + summary
 ownscribe edit-speakers ./260220-1736 --map Bob=Anna          # two labels for one person: merge them
 ownscribe edit-speakers ./260220-1736 --revert                # back to the files before the first edit
+ownscribe edit-speakers ./260220-1736 \
+    --assign 42=Anna --revision <revision>                     # move one line (segment 42) to Anna
 ```
+
+`--assign` moves single lines, numbered as `ownscribe show DIR --json` lists them under each turn's `segments`, to an existing or a new speaker; pass that output's `revision`, and the edit is refused (exit code 65) if the transcript changed since. A move rewrites a markdown transcript in ownscribe's layout and marks the summary as written before the move.
 
 The transcript changes only in its speaker labels, never in what was said. Before the first edit ownscribe keeps a copy of each changed file (`transcript.md.orig`, `summary.md.orig`), which `--revert` puts back. A folder another ownscribe process is working on is refused with exit code 75.
 

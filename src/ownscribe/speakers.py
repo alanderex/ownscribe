@@ -16,6 +16,8 @@ import json
 import re
 from pathlib import Path
 
+from ownscribe.output.json_output import dump_json
+
 # Speaker header line written by output/markdown.py: ``**LABEL** [mm:ss]``.
 # Anchored to line start so body lines (``[mm:ss] text``) never match.
 _MD_SPEAKER_RE = re.compile(r"^\*\*(.+?)\*\* \[", re.MULTILINE)
@@ -69,7 +71,7 @@ def rename_json(text: str, mapping: dict[str, str]) -> str:
         for word in seg.get("words", []):
             if word.get("speaker") in mapping:
                 word["speaker"] = mapping[word["speaker"]]
-    return json.dumps(data, indent=2, ensure_ascii=False)
+    return dump_json(data)
 
 
 def list_speakers(path: Path) -> list[str]:

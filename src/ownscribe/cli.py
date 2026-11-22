@@ -419,27 +419,55 @@ def rename_speakers_cmd(transcript: str, maps: tuple[str, ...]) -> None:
     metavar="LABEL=Name",
     help="Rename a speaker, e.g. --map SPEAKER_00=Anna; labels mapped to one name merge (repeatable).",
 )
+@click.option(
+    "--assign",
+    "assigns",
+    multiple=True,
+    metavar="INDEX=Name",
+    help="Move one transcript line (a segment index from show --json) to a speaker, existing or new (repeatable).",
+)
+@click.option("--revision", default=None, help="The transcript revision from show --json; required with --assign.")
 @click.option("--revert", is_flag=True, help="Put the transcript and summary back as they were before the first edit.")
-def edit_speakers_cmd(directory: str, maps: tuple[str, ...], revert: bool) -> None:
-    """Rename or merge speakers in a meeting's transcript and summary."""
+def edit_speakers_cmd(
+    directory: str, maps: tuple[str, ...], assigns: tuple[str, ...], revision: str | None, revert: bool
+) -> None:
+    """Rename, merge, or move speakers in a meeting's transcript and summary."""
     from pathlib import Path
 
-    from ownscribe.speaker_edits import rename_speakers, revert_speaker_edits
+    from ownscribe.speaker_edits import edit_speakers, revert_speaker_edits
 
     folder = Path(directory).resolve()
     if revert:
-        if maps:
-            raise click.UsageError("--revert cannot be combined with --map.")
+        if maps or assigns or revision:
+            raise click.UsageError("--revert cannot be combined with --map, --assign or --revision.")
         restored = revert_speaker_edits(folder)
         click.echo(f"Restored {', '.join(path.name for path in restored)} in {folder}")
         return
-    if not maps:
-        raise click.UsageError("Nothing to do: pass --map LABEL=Name (repeatable) or --revert.")
-    changed = rename_speakers(folder, _parse_speaker_map(maps))
+    if not maps and not assigns:
+        raise click.UsageError("Nothing to do: pass --map LABEL=Name, --assign INDEX=Name, or --revert.")
+    changed = edit_speakers(
+        folder, renames=_parse_speaker_map(maps), moves=_parse_assignments(assigns), revision=revision
+    )
     if changed:
         click.echo(f"Updated {', '.join(path.name for path in changed)} in {folder}")
     else:
         click.echo(f"Nothing changed in {folder}")
+
+
+def _parse_assignments(pairs: tuple[str, ...]) -> dict[int, str]:
+    """Parse `INDEX=Name` pairs; a line given twice is an error, not a last-one-wins."""
+    moves: dict[int, str] = {}
+    for pair in pairs:
+        index, sep, name = pair.partition("=")
+        index, name = index.strip(), name.strip()
+        if not sep or not index.isdigit() or not name:
+            raise click.BadParameter(
+                f"Expected INDEX=Name with a segment index from show --json, got {pair!r}", param_hint="--assign"
+            )
+        if int(index) in moves:
+            raise click.BadParameter(f"Line {index} is assigned twice.", param_hint="--assign")
+        moves[int(index)] = name
+    return moves
 
 
 @cli.command()
