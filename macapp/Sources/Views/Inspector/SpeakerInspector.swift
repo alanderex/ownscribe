@@ -18,6 +18,10 @@ struct SpeakerInspector: View {
     let problem: String?
     /// Puts back the files from before the first speaker edit; nil when there are none.
     let restore: (() -> Void)?
+    /// Plays a few seconds of a speaker; nil without a playable recording.
+    let playSample: ((String) -> Void)?
+    /// Why there is no sample to hear, when there is none.
+    let sampleUnavailable: String?
 
     @FocusState private var focusedSpeaker: String?
     @State private var confirmingRestore = false
@@ -31,6 +35,11 @@ struct SpeakerInspector: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
+                if playSample == nil, let sampleUnavailable {
+                    Text(sampleUnavailable)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 ForEach(draft.speakers, id: \.self) { speaker in
                     row(for: speaker)
                 }
@@ -40,6 +49,10 @@ struct SpeakerInspector: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .inspectorColumnWidth(min: 260, ideal: 300, max: 420)
+        // Naming someone starts with hearing them.
+        .onChange(of: focusedSpeaker) { _, speaker in
+            if let speaker, hasSample(speaker) { playSample?(speaker) }
+        }
     }
 
     private func row(for speaker: String) -> some View {
@@ -56,6 +69,16 @@ struct SpeakerInspector: View {
                     .disabled(readOnlyReason != nil)
                     .accessibilityLabel("Name for \(speaker)")
                 suggestions(for: speaker)
+                if let playSample, hasSample(speaker) {
+                    Button {
+                        playSample(speaker)
+                    } label: {
+                        Image(systemName: "play.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Play a few seconds of this speaker")
+                    .accessibilityLabel("Play a sample of \(draft.name(for: speaker))")
+                }
             }
             HStack(spacing: 8) {
                 Text(facts(for: speaker))
@@ -91,6 +114,11 @@ struct SpeakerInspector: View {
             },
             set: { rename(speaker, $0) }
         )
+    }
+
+    /// Speakers from the transcript have a longest turn to sample; new ones do not yet.
+    private func hasSample(_ speaker: String) -> Bool {
+        document.speakers.contains { $0.label == speaker }
     }
 
     private func nextSpeaker(after speaker: String) -> String? {

@@ -134,7 +134,9 @@ struct MeetingDetailView: View {
                 },
                 isSaving: isSaving,
                 problem: saveProblem,
-                restore: document.status.orig ? { Task { await restore() } } : nil
+                restore: document.status.orig ? { Task { await restore() } } : nil,
+                playSample: playback.url == nil ? nil : { label in playSample(of: label) },
+                sampleUnavailable: playback.unavailableReason
             )
         } else {
             ContentUnavailableView(
@@ -144,6 +146,16 @@ struct MeetingDetailView: View {
                     : "This meeting has no transcript to take speakers from.")
             )
         }
+    }
+
+    /// A speaker's longest turn, at most eight seconds of it.
+    private func playSample(of label: String) {
+        guard let url = playback.url, let document,
+              let stats = document.speakers.first(where: { $0.label == label }),
+              let turn = document.turns.first(where: { $0.ordinal == stats.longestTurn })
+        else { return }
+        let line = turn.segments.first?.index ?? -1
+        player.play(url, from: turn.start, line: line, until: min(turn.end, turn.start + 8))
     }
 
     /// The first turn with a line by `speaker` in the draft.
