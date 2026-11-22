@@ -29,13 +29,26 @@ final class LibraryTests: XCTestCase {
           "created": "2026-11-20T09:59:39+01:00", "title": "Iwr Uni Hd", "duration": 2401.0, "speaker_count": 3,
           "status": {"transcript": "present", "summary": "disabled", "audio": "/Users/a/ownscribe/261120-iwr-uni-hd/recording.wav", "orig": false}}]}
         """#
-        let rows = try LibraryListing.decode(Data(json.utf8))
+        let rows = try LibraryListing.decode(Data(json.utf8)).meetings
         XCTAssertEqual(rows.count, 1)
         XCTAssertEqual(rows[0].id, "/Users/a/ownscribe/261120-iwr-uni-hd")
         XCTAssertEqual(rows[0].speakerCount, 3)
         XCTAssertEqual(rows[0].status.audio, "/Users/a/ownscribe/261120-iwr-uni-hd/recording.wav")
         XCTAssertTrue(rows[0].isMeeting)
         XCTAssertFalse(rows[0].status.hasSummary)
+        XCTAssertEqual(rows[0].tags, [], "a CLI without tags lists none")
+    }
+
+    func testDecodesTagsOfRowsAndLibrary() throws {
+        let json = #"""
+        {"schema": 1, "meetings": [{"path": "/n/a", "name_day": null, "created": null, "title": "A",
+          "duration": null, "speaker_count": 0, "tags": ["ClientX", "Q4"],
+          "status": {"transcript": "present", "summary": "present", "audio": null, "orig": false}}],
+         "tags": [{"name": "ClientX", "count": 2}, {"name": "Q4", "count": 1}]}
+        """#
+        let listing = try LibraryListing.decode(Data(json.utf8))
+        XCTAssertEqual(listing.meetings[0].tags, ["ClientX", "Q4"])
+        XCTAssertEqual(listing.tags, [LibraryTag(name: "ClientX", count: 2), LibraryTag(name: "Q4", count: 1)])
     }
 
     func testDecodesSpeakerNamesAndBusyFolders() throws {
@@ -45,7 +58,9 @@ final class LibraryTests: XCTestCase {
           "status": {"transcript": "present", "summary": "present", "audio": null, "orig": false,
                      "busy": true, "holder_pid": 4711, "summary_stale": false}}]}
         """#
-        let rows = try LibraryListing.decode(Data(json.utf8))
+        let listing = try LibraryListing.decode(Data(json.utf8))
+        XCTAssertEqual(listing.tags, [], "a CLI without tags lists none")
+        let rows = listing.meetings
         XCTAssertEqual(rows[0].speakers, ["Anna", "SPEAKER_01"])
         XCTAssertEqual(rows[0].status.busy, .busy)
         XCTAssertEqual(rows[0].status.holderPid, 4711)

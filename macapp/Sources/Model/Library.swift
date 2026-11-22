@@ -9,6 +9,8 @@ import Observation
 final class Library {
     /// Every meeting folder, from `ownscribe show --list --json`.
     private(set) var rows: [LibraryRow] = []
+    /// The library's tags with their meeting counts, by name.
+    private(set) var tags: [LibraryTag] = []
     /// Why the last listing failed, while it keeps failing.
     private(set) var listFailure: String?
     /// Summary text by folder path, for the search field.
@@ -65,7 +67,9 @@ final class Library {
         if result.ok {
             let data = Data(result.stdout.utf8)
             do {
-                rows = try await Task.detached { try LibraryListing.decode(data) }.value
+                let listing = try await Task.detached { try LibraryListing.decode(data) }.value
+                rows = listing.meetings
+                tags = listing.tags
                 listFailure = nil
                 await indexSummaries()
             } catch {
@@ -83,6 +87,7 @@ final class Library {
         let folder = MeetingLoader.outputDir(engine.config)
         let meetings = await Task.detached { MeetingLoader.load(from: folder) }.value
         rows = meetings.map(Self.plainRow)
+        tags = []
         listFailure = nil
         await indexSummaries()
     }
