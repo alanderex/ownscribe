@@ -70,7 +70,8 @@ final class OwnscribeCLI {
     /// v0.15.3 is the first tag that contains it. v0.16.0 is the first with `show`
     /// and the folder events the window relies on; v0.17.0 the first with
     /// `edit-speakers`, the folder lock and `resume --resummarize`; v0.18.0 the first
-    /// with tags (`tag`, `tags`, tags in `show`), `models` and the omlx backend.
+    /// with tags (`tag`, `tags`, tags in `show`), `title`, `models`, the omlx backend
+    /// and `resume --instructions/--summary-model`.
     ///
     /// This is deliberately NOT the app's own version. CFBundleShortVersionString
     /// tracks the bundle; this tracks the CLI the bundle installs. A Swift-only

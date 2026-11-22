@@ -206,8 +206,16 @@ missing Screen Recording grant for the app.
   progress (its steps, Cancel, or its error) and the library by day, from
   `ownscribe show --list --json`, refreshed on changes in the output folder. The
   detail pane shows a meeting's summary or transcript (from `ownscribe show DIR
-  --json`); clicking a line plays the recording from there. The toolbar has Record
-  (▾ for the options) and a search field for titles and summaries (⌘F).
+  --json`); clicking a line plays the recording from there. The meeting's title,
+  facts, tags and the Summary/Transcript row stay at the top while the summary or
+  transcript scrolls. The pencil next to the title (or a double-click) renames the
+  meeting; the title is kept as typed (`ownscribe title`) and the folder keeps its
+  name. The toolbar has Record (▾ for the options) and a search field for titles
+  and summaries (⌘F).
+- **Summarize…** (Re-summarize… once there is one): your own instructions for the
+  summary, a template (built-in or custom) and a model, on the backend from
+  Settings, run as `ownscribe resume DIR --resummarize`. It starts from what made
+  the current summary; the stale-summary banner opens it too.
 - **Tags**: chips under a meeting's title; × removes one, "+ Tag" adds one and
   offers the library's tags as you type (a tag the library has keeps its
   spelling). The sidebar's Tags section lists every tag with its number of
