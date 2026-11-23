@@ -9,6 +9,8 @@ import os
 import re
 from unittest import mock
 
+import pytest
+
 from ownscribe.config import Config
 from ownscribe.transcription.models import Segment, TranscriptResult
 
@@ -208,7 +210,7 @@ class TestFormatOutput:
         )
 
         mock_summarizer = mock.MagicMock()
-        mock_summarizer.is_available.return_value = True
+        mock_summarizer.problem.return_value = None
         mock_summarizer.summarize.return_value = "## Summary\nGood meeting."
         mock_summarizer.generate_title.return_value = ""
 
@@ -400,7 +402,7 @@ class TestDoTranscribeAndSummarize:
         )
 
         mock_summarizer = mock.MagicMock()
-        mock_summarizer.is_available.return_value = True
+        mock_summarizer.problem.return_value = None
         mock_summarizer.summarize.return_value = "## Summary\nGood meeting."
 
         with (
@@ -443,7 +445,7 @@ class TestDoTranscribeAndSummarize:
         mock_transcriber.transcribe.return_value = self._make_transcript()
 
         mock_summarizer = mock.MagicMock()
-        mock_summarizer.is_available.return_value = True
+        mock_summarizer.problem.return_value = None
         mock_summarizer.summarize.return_value = "## Summary\nGood meeting."
 
         with (
@@ -470,7 +472,7 @@ class TestDoTranscribeAndSummarize:
         mock_transcriber.transcribe.return_value = self._make_transcript()
 
         mock_summarizer = mock.MagicMock()
-        mock_summarizer.is_available.return_value = False
+        mock_summarizer.problem.return_value = "oMLX is not reachable at http://127.0.0.1:8000/v1. Is it running?"
 
         with (
             mock.patch("ownscribe.pipeline._create_transcriber", return_value=mock_transcriber),
@@ -547,7 +549,7 @@ class TestDoTranscribeAndSummarize:
         mock_transcriber.transcribe.return_value = self._make_transcript()
 
         mock_summarizer = mock.MagicMock()
-        mock_summarizer.is_available.return_value = True
+        mock_summarizer.problem.return_value = None
         mock_summarizer.summarize.side_effect = Exception("GPU OOM")
 
         with (
@@ -581,7 +583,7 @@ class TestDoTranscribeAndSummarize:
         mock_transcriber.transcribe.return_value = self._make_transcript()
 
         mock_summarizer = mock.MagicMock()
-        mock_summarizer.is_available.return_value = True
+        mock_summarizer.problem.return_value = None
         mock_summarizer.summarize.return_value = "## Summary\nGood meeting."
         mock_summarizer.generate_title.return_value = "Budget Review"
 
@@ -648,7 +650,7 @@ class TestDoTranscribeAndSummarize:
         mock_transcriber.transcribe.return_value = self._make_transcript()
 
         mock_summarizer = mock.MagicMock()
-        mock_summarizer.is_available.return_value = True
+        mock_summarizer.problem.return_value = None
         mock_summarizer.summarize.return_value = "## Summary\nGood meeting."
         mock_summarizer.generate_title.return_value = "Budget Review"
 
@@ -881,7 +883,7 @@ class TestRunSummarizeTranscriptText:
         from ownscribe.pipeline import run_summarize
 
         mock_summarizer = mock.MagicMock()
-        mock_summarizer.is_available.return_value = True
+        mock_summarizer.problem.return_value = None
         mock_summarizer.summarize.return_value = "## Summary\nGood meeting."
         mock_summarizer.generate_title.return_value = ""
 
@@ -952,6 +954,26 @@ class TestRunSummarizeTranscriptText:
         assert self._summarize(Config(), tx_path) == "Just some notes I typed myself."
 
 
+class TestRunSummarizeProblem:
+    def test_prints_the_reason_and_writes_nothing(self, tmp_path, capsys):
+        from ownscribe.pipeline import run_summarize
+
+        transcript = tmp_path / "transcript.md"
+        transcript.write_text("# Transcript\n\n[00:00] Hello.\n")
+        summarizer = mock.MagicMock()
+        summarizer.problem.return_value = "oMLX refused the API key (summarization.api_key or OPENAI_API_KEY)."
+        with (
+            mock.patch("ownscribe.pipeline.create_summarizer", return_value=summarizer),
+            pytest.raises(SystemExit) as exit_info,
+        ):
+            run_summarize(Config(), str(transcript))
+
+        assert exit_info.value.code == 1
+        assert "Error: oMLX refused the API key" in capsys.readouterr().err
+        assert not (tmp_path / "summary.md").exists()
+        summarizer.summarize.assert_not_called()
+
+
 class TestRunSummarizeColocation:
     """Test that run_summarize saves output alongside the input file."""
 
@@ -967,7 +989,7 @@ class TestRunSummarizeColocation:
         config.summarization.enabled = True
 
         mock_summarizer = mock.MagicMock()
-        mock_summarizer.is_available.return_value = True
+        mock_summarizer.problem.return_value = None
         mock_summarizer.summarize.return_value = "## Summary\nGood meeting."
         mock_summarizer.generate_title.return_value = "test-title"
 
@@ -998,7 +1020,7 @@ class TestRunSummarizeColocation:
         config.output.audio_dir = str(tmp_path / "audio-cache")
 
         mock_summarizer = mock.MagicMock()
-        mock_summarizer.is_available.return_value = True
+        mock_summarizer.problem.return_value = None
         mock_summarizer.summarize.return_value = "## Summary\nGood meeting."
         mock_summarizer.generate_title.return_value = "test-title"
 
@@ -1031,7 +1053,7 @@ class TestRunSummarizeColocation:
         config.output.audio_dir = str(tmp_path / "audio-cache")
 
         mock_summarizer = mock.MagicMock()
-        mock_summarizer.is_available.return_value = True
+        mock_summarizer.problem.return_value = None
         mock_summarizer.summarize.return_value = "## Summary\nGood meeting."
         mock_summarizer.generate_title.return_value = "test-title"
 
@@ -1441,7 +1463,8 @@ class TestMeetingSavedEvent:
     @staticmethod
     def _summarizer(*, available: bool = True, fails: bool = False, title: str = "Q2 Sales Review"):
         summarizer = mock.MagicMock()
-        summarizer.is_available.return_value = available
+        unreachable = "Ollama is not reachable at http://localhost:11434. Is it running?"
+        summarizer.problem.return_value = None if available else unreachable
         if fails:
             summarizer.summarize.side_effect = RuntimeError("model crashed")
         else:
@@ -1492,6 +1515,28 @@ class TestMeetingSavedEvent:
         self._transcribe(tmp_path, Config(), self._summarizer(available=False))
 
         assert self._events(capsys)[-1]["summary"] == "unavailable"
+
+    def test_unavailable_summarizer_says_why_and_keeps_the_transcript(self, tmp_path, capsys):
+        out_dir = self._transcribe(tmp_path, Config(), self._summarizer(available=False))
+
+        assert (out_dir / "transcript.md").is_file()
+        assert not (out_dir / "summary.md").exists()
+        assert "Ollama is not reachable at http://localhost:11434. Is it running?" in capsys.readouterr().err
+
+    def test_a_new_summary_records_what_it_was_written_with(self, tmp_path):
+        from ownscribe.meeting_meta import read_meta, summary_request
+
+        config = Config()
+        config.summarization.template = "brief"
+        # No title, so the folder keeps the name _transcribe returns.
+        out_dir = self._transcribe(tmp_path, config, self._summarizer(title=""))
+
+        assert summary_request(out_dir, read_meta(out_dir)) == {
+            "backend": "local",
+            "model": "phi-4-mini",
+            "template": "brief",
+            "instructions": "",
+        }
 
     def test_summary_failed(self, tmp_path, capsys, monkeypatch):
         monkeypatch.setenv("OWNSCRIBE_PROGRESS_EVENTS", "1")
@@ -1599,6 +1644,45 @@ class TestFolderLocking:
             run_resume(Config(), str(tmp_path))
 
         assert seen == [LockState(busy=True, holder_pid=os.getpid())]
+
+    def test_summarize_refuses_a_folder_another_process_holds(self, tmp_path, hold_folder_lock):
+        from ownscribe.locks import BUSY_EXIT_CODE, FolderBusyError
+        from ownscribe.pipeline import run_summarize
+
+        transcript = tmp_path / "transcript.md"
+        transcript.write_text("# Transcript\n\n[00:00] Hello.\n")
+        with (
+            hold_folder_lock(tmp_path) as holder,
+            mock.patch("ownscribe.pipeline.create_summarizer") as create,
+            pytest.raises(FolderBusyError) as refused,
+        ):
+            run_summarize(Config(), str(transcript))
+
+        assert refused.value.exit_code == BUSY_EXIT_CODE
+        assert refused.value.holder_pid == holder.pid
+        create.assert_not_called()
+        assert sorted(p.name for p in tmp_path.iterdir()) == [".ownscribe.lock", "transcript.md"]
+
+    def test_summarize_holds_the_lock_while_it_writes(self, tmp_path):
+        from ownscribe.locks import LockState, probe
+        from ownscribe.pipeline import run_summarize
+
+        transcript = tmp_path / "transcript.md"
+        transcript.write_text("# Transcript\n\n[00:00] Hello.\n")
+        seen: list[LockState] = []
+        summarizer = mock.MagicMock()
+        summarizer.problem.return_value = None
+        summarizer.summarize.side_effect = lambda _text, _instructions: seen.append(probe(tmp_path)) or "## Summary"
+        summarizer.generate_title.return_value = ""
+        with (
+            mock.patch("ownscribe.pipeline.create_summarizer", return_value=summarizer),
+            mock.patch("ownscribe.pipeline._needs_model_download", return_value=False),
+            mock.patch("ownscribe.pipeline._download_summarization_model"),
+        ):
+            run_summarize(Config(), str(transcript))
+
+        assert seen == [LockState(busy=True, holder_pid=os.getpid())]
+        assert (tmp_path / "summary.md").is_file()
 
     def test_a_title_can_take_the_name_of_a_folder_holding_only_a_free_lock_file(self, tmp_path):
         from ownscribe.locks import LOCK_NAME
@@ -1721,4 +1805,71 @@ class TestResummarize:
             result = CliRunner().invoke(cli, ["resume", str(tmp_path), "--resummarize"])
 
         assert result.exit_code == 0, result.output
-        assert resume.call_args.kwargs == {"resummarize": True}
+        assert resume.call_args.kwargs == {"resummarize": True, "instructions": ""}
+
+    def test_instructions_template_and_model_reach_the_summary(self, tmp_path):
+        from click.testing import CliRunner
+
+        from ownscribe.cli import cli
+
+        with (
+            mock.patch("ownscribe.cli.Config.load", return_value=Config()),
+            mock.patch("ownscribe.pipeline.run_resume") as resume,
+        ):
+            result = CliRunner().invoke(
+                cli,
+                [
+                    "resume",
+                    str(tmp_path),
+                    "--resummarize",
+                    "--instructions",
+                    "  Focus on the budget. ",
+                    "--template",
+                    "brief",
+                    "--summary-model",
+                    "gemma",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        config = resume.call_args.args[0]
+        assert (config.summarization.template, config.summarization.model) == ("brief", "gemma")
+        assert resume.call_args.kwargs == {"resummarize": True, "instructions": "Focus on the budget."}
+
+    def test_instructions_and_model_need_resummarize(self, tmp_path):
+        from click.testing import CliRunner
+
+        from ownscribe.cli import cli
+
+        for flag in ("--instructions", "--summary-model"):
+            with (
+                mock.patch("ownscribe.cli.Config.load", return_value=Config()),
+                mock.patch("ownscribe.pipeline.run_resume") as resume,
+            ):
+                result = CliRunner().invoke(cli, ["resume", str(tmp_path), flag, "x"])
+            assert result.exit_code == 2, flag
+            assert "only with --resummarize" in result.output
+            resume.assert_not_called()
+
+    def test_records_what_the_summary_was_written_with(self, tmp_path):
+        from ownscribe.meeting_meta import read_meta, summary_request
+        from ownscribe.pipeline import run_resume
+
+        folder = self._folder(tmp_path)
+        config = Config()
+        config.summarization.backend = "omlx"
+        config.summarization.model = "gemma"
+        summarizer = TestMeetingSavedEvent._summarizer()
+        with (
+            mock.patch("ownscribe.pipeline.create_summarizer", return_value=summarizer),
+            mock.patch("ownscribe.pipeline._needs_model_download", return_value=False),
+        ):
+            run_resume(config, str(folder), resummarize=True, instructions="Write it in German.")
+
+        summarizer.summarize.assert_called_once_with(mock.ANY, "Write it in German.")
+        assert summary_request(folder, read_meta(folder)) == {
+            "backend": "omlx",
+            "model": "gemma",
+            "template": "meeting",
+            "instructions": "Write it in German.",
+        }

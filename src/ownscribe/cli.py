@@ -266,8 +266,10 @@ def summarize(ctx: click.Context, file: str, template: str | None) -> None:
 @click.option(
     "--resummarize",
     is_flag=True,
-    help="Write the summary again from the current transcript (after moving speakers); keeps the folder name.",
+    help="Write the summary (again) from the current transcript; keeps the folder name.",
 )
+@click.option("--instructions", default=None, help="Your own instructions for the summary (with --resummarize).")
+@click.option("--summary-model", default=None, help="Summarization model for this summary only (with --resummarize).")
 @click.pass_context
 def resume(
     ctx: click.Context,
@@ -276,8 +278,12 @@ def resume(
     language: str | None,
     template: str | None,
     resummarize: bool,
+    instructions: str | None,
+    summary_model: str | None,
 ) -> None:
     """Resume a partially-completed pipeline in a meeting directory."""
+    if not resummarize and (instructions is not None or summary_model is not None):
+        raise click.UsageError("--instructions and --summary-model apply only with --resummarize.")
     config = ctx.obj["config"]
     if model:
         config.transcription.model = model
@@ -285,10 +291,12 @@ def resume(
         config.transcription.language = language
     if template:
         config.summarization.template = template
+    if summary_model:
+        config.summarization.model = summary_model
 
     from ownscribe.pipeline import run_resume
 
-    run_resume(config, directory, resummarize=resummarize)
+    run_resume(config, directory, resummarize=resummarize, instructions=(instructions or "").strip())
 
 
 @cli.command()
@@ -383,6 +391,40 @@ def show(ctx: click.Context, directory: str | None, list_all: bool, as_json: boo
     click.echo(json.dumps(payload, ensure_ascii=False))
 
 
+@cli.command("models")
+@click.option("--json", "as_json", is_flag=True, help="Print JSON (the only output format).")
+@click.pass_context
+def models_cmd(ctx: click.Context, as_json: bool) -> None:
+    """List the models the configured omlx or openai summarization server offers."""
+    import json
+
+    from ownscribe.summarization import create_summarizer
+    from ownscribe.summarization.base import SummarizerUnavailable
+
+    if not as_json:
+        raise click.UsageError("models prints JSON only; pass --json.")
+    config = ctx.obj["config"]
+    backend = config.summarization.backend
+    if backend not in ("omlx", "openai"):
+        raise click.UsageError(
+            f"models lists the models of an omlx or openai server; summarization.backend is {backend!r}."
+        )
+    try:
+        summarizer = create_summarizer(config)
+    except ImportError as exc:
+        raise click.ClickException(str(exc)) from None
+    from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+    if not isinstance(summarizer, OpenAISummarizer):
+        raise click.ClickException(f"The {backend} backend is not an OpenAI-compatible server.")
+    try:
+        served = summarizer.served_models()
+    except SummarizerUnavailable as exc:
+        raise click.ClickException(str(exc)) from None
+    payload = {"schema": 1, "backend": backend, "host": summarizer.base_url, "models": served}
+    click.echo(json.dumps(payload, ensure_ascii=False))
+
+
 @cli.command("list-speakers")
 @click.argument("transcript", type=click.Path(exists=True, dir_okay=False))
 def list_speakers_cmd(transcript: str) -> None:
@@ -458,6 +500,61 @@ def edit_speakers_cmd(
         click.echo(f"Updated {', '.join(path.name for path in changed)} in {folder}")
     else:
         click.echo(f"Nothing changed in {folder}")
+
+
+@cli.command("tag")
+@click.argument("directory", type=click.Path(exists=True, file_okay=False))
+@click.option(
+    "--add", "adds", multiple=True, metavar="TAG", help="Add a tag; the library's spelling is kept (repeatable)."
+)
+@click.option("--remove", "removes", multiple=True, metavar="TAG", help="Remove a tag (repeatable).")
+@click.pass_context
+def tag_cmd(ctx: click.Context, directory: str, adds: tuple[str, ...], removes: tuple[str, ...]) -> None:
+    """Add or remove a meeting's tags."""
+    from pathlib import Path
+
+    from ownscribe.tags import edit_tags
+
+    if not adds and not removes:
+        raise click.UsageError("Nothing to do: pass --add TAG or --remove TAG.")
+    folder = Path(directory).resolve()
+    tags = edit_tags(ctx.obj["config"], folder, add=adds, remove=removes)
+    click.echo(f"Tags of {folder.name}: {', '.join(tags) if tags else '(none)'}")
+
+
+@cli.command("title")
+@click.argument("directory", type=click.Path(exists=True, file_okay=False))
+@click.argument("title")
+def title_cmd(directory: str, title: str) -> None:
+    """Give a meeting a title of its own, shown as typed; the folder keeps its name."""
+    from pathlib import Path
+
+    from ownscribe.titles import set_title
+
+    folder = Path(directory).resolve()
+    click.echo(f"Title of {folder.name}: {set_title(folder, title)}")
+
+
+@cli.command("tags")
+@click.option("--json", "as_json", is_flag=True, help="Print every tag with its number of meetings, as JSON.")
+@click.option("--delete", "delete", default=None, metavar="TAG", help="Remove TAG from every meeting.")
+@click.pass_context
+def tags_cmd(ctx: click.Context, as_json: bool, delete: str | None) -> None:
+    """List the library's tags (--json), or remove one from every meeting (--delete)."""
+    import json
+
+    from ownscribe.tags import TAGS_SCHEMA, delete_tag, library_tags, tags_listing
+
+    config = ctx.obj["config"]
+    if delete is not None:
+        if as_json:
+            raise click.UsageError("Pass --json or --delete, not both.")
+        deleted = delete_tag(config, delete)
+        click.echo(f"Removed '{deleted.name}' from {deleted.count} meeting{'' if deleted.count == 1 else 's'}.")
+        return
+    if not as_json:
+        raise click.UsageError("tags prints JSON only; pass --json (or --delete TAG).")
+    click.echo(json.dumps({"schema": TAGS_SCHEMA, "tags": tags_listing(library_tags(config))}, ensure_ascii=False))
 
 
 def _parse_assignments(pairs: tuple[str, ...]) -> dict[int, str]:

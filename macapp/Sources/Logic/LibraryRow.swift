@@ -80,6 +80,8 @@ struct LibraryRow: Decodable, Identifiable, Hashable {
     let speakerCount: Int
     /// The meeting's speaker labels, named or not: names offered when naming speakers.
     let speakers: [String]
+    /// The meeting's tags in the library's spelling, so they match the library's tags exactly.
+    let tags: [String]
     let status: Status
 
     /// Meetings are keyed by folder path.
@@ -91,14 +93,14 @@ struct LibraryRow: Decodable, Identifiable, Hashable {
     var isMeeting: Bool { status.hasTranscript || status.hasSummary }
 
     enum CodingKeys: String, CodingKey {
-        case path, created, title, duration, status, speakers
+        case path, created, title, duration, status, speakers, tags
         case nameDay = "name_day"
         case speakerCount = "speaker_count"
     }
 
     init(
         path: String, nameDay: String?, created: String?, title: String, duration: Double?,
-        speakerCount: Int, speakers: [String] = [], status: Status
+        speakerCount: Int, speakers: [String] = [], tags: [String] = [], status: Status
     ) {
         self.path = path
         self.nameDay = nameDay
@@ -107,6 +109,7 @@ struct LibraryRow: Decodable, Identifiable, Hashable {
         self.duration = duration
         self.speakerCount = speakerCount
         self.speakers = speakers
+        self.tags = tags
         self.status = status
     }
 
@@ -119,8 +122,17 @@ struct LibraryRow: Decodable, Identifiable, Hashable {
         duration = try c.decodeIfPresent(Double.self, forKey: .duration)
         speakerCount = try c.decode(Int.self, forKey: .speakerCount)
         speakers = try c.decodeIfPresent([String].self, forKey: .speakers) ?? []
+        tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
         status = try c.decode(Status.self, forKey: .status)
     }
+}
+
+/// A tag as the library spells it, with the number of meetings that have it.
+struct LibraryTag: Decodable, Hashable, Identifiable {
+    let name: String
+    let count: Int
+
+    var id: String { name }
 }
 
 /// The whole `show --list --json` document.
@@ -135,11 +147,24 @@ struct LibraryListing: Decodable {
 
     let schema: Int
     let meetings: [LibraryRow]
+    /// The library's tags by name; empty from a CLI without tags.
+    let tags: [LibraryTag]
 
-    static func decode(_ data: Data) throws -> [LibraryRow] {
+    enum CodingKeys: String, CodingKey {
+        case schema, meetings, tags
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schema = try c.decode(Int.self, forKey: .schema)
+        meetings = try c.decode([LibraryRow].self, forKey: .meetings)
+        tags = try c.decodeIfPresent([LibraryTag].self, forKey: .tags) ?? []
+    }
+
+    static func decode(_ data: Data) throws -> LibraryListing {
         let listing = try JSONDecoder().decode(LibraryListing.self, from: data)
         guard listing.schema == supportedSchema else { throw Failure.unsupportedSchema(listing.schema) }
-        return listing.meetings
+        return listing
     }
 }
 

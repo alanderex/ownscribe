@@ -18,11 +18,27 @@ enum FailureText {
             // The exception type and message are on the final line of a traceback.
             return lines.last
         }
+        // The CLI says what went wrong on an "Error:" line, often after lines that
+        // report progress ("Found transcript: …"), which explain nothing.
+        if let error = lines.first(where: { $0.hasPrefix("Error:") }) {
+            return error
+        }
         // A torch/pyannote import prints deprecation warnings long before anything
         // fails, so "first line" was usually library noise rather than the error.
         // Prefer the first line that isn't recognisable noise; fall back to the
         // first line rather than nothing, since an unrecognised error still helps.
         return lines.first(where: { !isLibraryNoise($0) }) ?? lines.first
+    }
+
+    /// The whole message of a CLI error that spans several lines (a list of busy
+    /// folders, say), without click's "Error: " prefix; nil when stderr is empty.
+    static func wholeMessage(_ text: String) -> String? {
+        let message = text.components(separatedBy: "\n")
+            .filter { !isProgressEventLine($0.trimmingCharacters(in: .whitespaces)) }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty else { return nil }
+        return message.hasPrefix("Error: ") ? String(message.dropFirst("Error: ".count)) : message
     }
 
     private static func isLibraryNoise(_ line: String) -> Bool {

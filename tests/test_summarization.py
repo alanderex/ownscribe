@@ -39,6 +39,7 @@ class TestCreateSummarizerMissingDeps:
         [
             ("ollama", "ownscribe.summarization.ollama_summarizer", "ollama"),
             ("openai", "ownscribe.summarization.openai_summarizer", "openai"),
+            ("omlx", "ownscribe.summarization.openai_summarizer", "openai"),
         ],
     )
     def test_missing_backend_dep(self, backend, module, extra):
@@ -47,6 +48,128 @@ class TestCreateSummarizerMissingDeps:
 
         with patch.dict("sys.modules", {module: None}), pytest.raises(ImportError, match=f"ownscribe\\[{extra}\\]"):
             create_summarizer(config)
+
+
+class TestOMLXBackend:
+    """oMLX is reached through the OpenAI-compatible summarizer."""
+
+    def test_factory_returns_the_openai_compatible_summarizer(self):
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        config = Config()
+        config.summarization.backend = "omlx"
+        assert isinstance(create_summarizer(config), OpenAISummarizer)
+
+    def test_default_address_is_omlx_own(self):
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        summarizer = OpenAISummarizer(SummarizationConfig(backend="omlx", model="m"))
+        assert str(summarizer._client.base_url) == "http://127.0.0.1:8000/v1/"
+
+    def test_summarizes_with_the_api_key(self, httpserver):
+        response_body = {
+            "id": "chatcmpl-test",
+            "object": "chat.completion",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "Notes"}, "finish_reason": "stop"}],
+            "model": "m",
+        }
+        httpserver.expect_request(
+            "/v1/chat/completions", method="POST", headers={"Authorization": "Bearer omlx-key"}
+        ).respond_with_json(response_body)
+        config = SummarizationConfig(host=httpserver.url_for(""), backend="omlx", model="m", api_key="omlx-key")
+
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        assert OpenAISummarizer(config).summarize("Anna: Hello") == "Notes"
+        assert _request_body(httpserver, "/v1/chat/completions")["model"] == "m"
+
+
+def _models_page(*ids: str) -> dict:
+    return {"object": "list", "data": [{"id": i, "object": "model", "owned_by": "omlx"} for i in ids]}
+
+
+class TestServedModels:
+    def test_lists_the_ids_sorted_by_name(self, httpserver):
+        httpserver.expect_request("/v1/models", method="GET").respond_with_json(_models_page("b-model", "A-model", "c"))
+        config = SummarizationConfig(host=httpserver.url_for(""), backend="omlx", model="c")
+
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        assert OpenAISummarizer(config).served_models() == ["A-model", "b-model", "c"]
+
+    def test_omlx_must_serve_the_configured_model(self, httpserver):
+        httpserver.expect_request("/v1/models", method="GET").respond_with_json(_models_page("gemma", "qwen"))
+        config = SummarizationConfig(host=httpserver.url_for(""), backend="omlx", model="llama")
+
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        assert OpenAISummarizer(config).problem() == (
+            "oMLX does not serve the model 'llama' (summarization.model). "
+            "`ownscribe models --json` lists the 2 it serves."
+        )
+
+    def test_other_servers_are_not_held_to_their_list(self, httpserver):
+        # LM Studio and others may list only loaded models and load others on demand.
+        httpserver.expect_request("/v1/models", method="GET").respond_with_json(_models_page("gemma"))
+        config = SummarizationConfig(host=httpserver.url_for(""), backend="openai", model="llama")
+
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        assert OpenAISummarizer(config).problem() is None
+
+
+class TestModelsCommand:
+    @staticmethod
+    def _run(config: Config, *args: str):
+        from click.testing import CliRunner
+
+        from ownscribe.cli import cli
+
+        with patch("ownscribe.cli.Config.load", return_value=config):
+            return CliRunner().invoke(cli, ["models", *args])
+
+    @staticmethod
+    def _config(backend: str, host: str = "", api_key: str = "") -> Config:
+        config = Config()
+        config.summarization.backend = backend
+        config.summarization.host = host
+        config.summarization.api_key = api_key
+        return config
+
+    def test_prints_the_served_models(self, httpserver):
+        import json
+
+        httpserver.expect_request("/v1/models", method="GET", headers={"Authorization": "Bearer k"}).respond_with_json(
+            _models_page("qwen", "Gemma")
+        )
+        result = self._run(self._config("omlx", httpserver.url_for(""), "k"), "--json")
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output) == {
+            "schema": 1,
+            "backend": "omlx",
+            "host": httpserver.url_for("").rstrip("/") + "/v1",
+            "models": ["Gemma", "qwen"],
+        }
+
+    def test_a_refused_key_says_so(self, httpserver):
+        httpserver.expect_request("/v1/models", method="GET").respond_with_json({"error": "no"}, status=401)
+        result = self._run(self._config("omlx", httpserver.url_for("")), "--json")
+        assert result.exit_code == 1
+        assert "oMLX refused the API key" in result.output
+
+    def test_a_server_that_is_not_running_says_so(self):
+        result = self._run(self._config("omlx", "http://localhost:1"), "--json")
+        assert result.exit_code == 1
+        assert "oMLX is not reachable at http://localhost:1/v1. Is it running?" in result.output
+
+    @pytest.mark.parametrize("backend", ["local", "ollama"])
+    def test_other_backends_are_a_usage_error(self, backend):
+        result = self._run(self._config(backend), "--json")
+        assert result.exit_code == 2
+        assert "omlx or openai server" in result.output
+
+    def test_json_is_required(self):
+        assert self._run(self._config("omlx")).exit_code == 2
 
 
 class TestCleanResponse:
@@ -302,6 +425,7 @@ class TestOllamaSummarizer:
 
         summarizer = OllamaSummarizer(config)
         assert summarizer.is_available() is False
+        assert summarizer.problem() == "Ollama is not reachable at http://localhost:1. Is it running?"
 
 
 class TestOpenAIGenerateTitle:
@@ -409,6 +533,35 @@ class TestOpenAISummarizer:
 
         summarizer = OpenAISummarizer(config)
         assert summarizer.is_available() is False
+
+    def test_problem_names_an_unreachable_server(self):
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        config = SummarizationConfig(host="http://localhost:1", backend="omlx", model="m")
+        assert OpenAISummarizer(config).problem() == "oMLX is not reachable at http://localhost:1/v1. Is it running?"
+
+    def test_problem_names_a_refused_api_key(self, httpserver):
+        httpserver.expect_request("/v1/models", method="GET").respond_with_json(
+            {"error": {"message": "Invalid API key"}}, status=401
+        )
+        config = SummarizationConfig(host=httpserver.url_for(""), backend="omlx", model="m", api_key="wrong")
+
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        summarizer = OpenAISummarizer(config)
+        assert summarizer.problem() == "oMLX refused the API key (summarization.api_key or OPENAI_API_KEY)."
+        assert summarizer.is_available() is False
+
+    def test_problem_reports_a_server_error(self, httpserver):
+        httpserver.expect_request("/v1/models", method="GET").respond_with_json({"error": "boom"}, status=500)
+        config = SummarizationConfig(host=httpserver.url_for(""), backend="openai", model="m")
+
+        from ownscribe.summarization.openai_summarizer import OpenAISummarizer
+
+        problem = OpenAISummarizer(config).problem()
+        assert problem is not None
+        assert problem.startswith("The OpenAI-compatible server at ")
+        assert "answered with an error" in problem
 
     def test_summarize_cleans_think_tags(self, httpserver):
         response_body = {
@@ -522,6 +675,19 @@ class TestLlamaCppSummarizer:
         summarizer = LlamaCppSummarizer(config)
         with patch.dict("sys.modules", {"llama_cpp": None}):
             assert summarizer.is_available() is False
+
+    def test_an_mlx_model_name_points_to_omlx(self, mock_llama):
+        # A model name oMLX serves is not something llama.cpp can load.
+        config = SummarizationConfig(backend="local", model="mlx-community--gemma-4-26B-A4B-it-qat-4bit")
+
+        from ownscribe.summarization.llama_cpp_summarizer import LlamaCppSummarizer
+
+        summarizer = LlamaCppSummarizer(config)
+        problem = summarizer.problem()
+        assert problem is not None
+        assert "Unknown model 'mlx-community--gemma-4-26B-A4B-it-qat-4bit'" in problem
+        assert 'set summarization.backend = "omlx"' in problem
+        assert summarizer.is_available() is False
 
 
 class TestLlamaCppGenerateTitle:
@@ -948,6 +1114,33 @@ class TestSummarizeSingleShot:
         assert len(summarizer.completions) == 1
         # Passed through whole, not reassembled from chunks.
         assert text in summarizer.completions[0][1]
+
+
+class TestSummarizeInstructions:
+    def test_instructions_join_the_system_prompt(self):
+        summarizer = _RecordingSummarizer(SummarizationConfig(context_size=8192))
+
+        summarizer.summarize("SPEAKER_00: Short meeting.", "  Write it in German.  ")
+
+        [(system, _user)] = summarizer.completions
+        assert system.startswith(resolve_template("meeting", {})[0])
+        assert system.endswith("Also follow these instructions from the user:\nWrite it in German.")
+
+    def test_every_chunk_and_the_merge_follow_them(self):
+        summarizer = _RecordingSummarizer(SummarizationConfig(context_size=1000))
+
+        summarizer.summarize(_transcript(3000), "Focus on the budget.")
+
+        assert len(summarizer.completions) > 2
+        # The merge step adds its own system text after the template's and the user's.
+        assert all("from the user:\nFocus on the budget." in system for system, _ in summarizer.completions)
+
+    def test_no_instructions_leave_the_template_alone(self):
+        summarizer = _RecordingSummarizer(SummarizationConfig(context_size=8192))
+
+        summarizer.summarize("SPEAKER_00: Short meeting.", "   ")
+
+        assert summarizer.completions[0][0] == resolve_template("meeting", {})[0]
 
 
 class TestSummarizeMapReduce:

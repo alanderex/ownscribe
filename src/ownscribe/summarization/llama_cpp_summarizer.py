@@ -217,13 +217,26 @@ class LlamaCppSummarizer(Summarizer):
                 continue
         return ""
 
-    def is_available(self) -> bool:
+    def problem(self) -> str | None:
+        """llama.cpp must be installed and the model a GGUF it can load.
+
+        An MLX model name here used to fail only after transcription, as a bare
+        "Summarization failed"; MLX models run through oMLX instead.
+        """
         try:
             import llama_cpp  # noqa: F401
-
-            return True
         except ImportError:
-            return False
+            return "The local backend needs llama-cpp-python, which is not installed."
+        try:
+            _resolve_model_ref(self._config.model)
+        except FileNotFoundError as exc:
+            return f'{exc}. MLX models run through oMLX: set summarization.backend = "omlx".'
+        except ValueError as exc:
+            return str(exc)
+        return None
+
+    def is_available(self) -> bool:
+        return self.problem() is None
 
     def _complete(self, system_prompt: str, user_prompt: str) -> str:
         llm = self._get_llm()

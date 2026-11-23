@@ -21,9 +21,11 @@ from typing import Protocol
 
 from ownscribe.config import Config
 from ownscribe.locks import probe
-from ownscribe.meeting_files import ORIGINAL_NAMES, TRANSCRIPT_NAMES
-from ownscribe.meeting_meta import summary_is_stale
+from ownscribe.meeting_files import ORIGINAL_NAMES, TRANSCRIPT_NAMES, meeting_folders
+from ownscribe.meeting_meta import read_meta, summary_is_stale, summary_request
 from ownscribe.pipeline import _find_summary, find_meeting_audio
+from ownscribe.tags import LibraryTag, group_tags, in_library_spelling, meeting_tags, tags_listing
+from ownscribe.titles import stored_title
 from ownscribe.transcript_io import read_transcript
 from ownscribe.transcription.models import Segment, TranscriptResult
 
@@ -203,16 +205,21 @@ def meeting_detail(config: Config, directory: Path) -> dict:
     transcript = read_transcript(directory)
     result = transcript.result if transcript else None
     turns = build_turns(result) if result else []
+    meta = read_meta(directory)
     return {
         "schema": SCHEMA_VERSION,
-        "title": folder_title(directory.name),
+        "title": _title(directory, meta),
         "language": (result.language or None) if result else None,
         "duration": _duration(result),
         "revision": transcript.revision if transcript else None,
         "standard_layout": transcript.standard_layout if transcript else None,
+        # As the folder spells them: one meeting is shown without reading the library.
+        "tags": meeting_tags(directory, meta),
+        # What the summary was written with, so it can be asked for again alike.
+        "summary_request": summary_request(directory, meta),
         "turns": [_turn_json(turn) for turn in turns],
         "speakers": speaker_stats(turns),
-        "status": _status(config, directory),
+        "status": _status(config, directory, meta),
     }
 
 
@@ -230,19 +237,24 @@ def _turn_json(turn: Turn) -> dict:
 
 
 def meeting_rows(config: Config) -> dict:
-    """One row per meeting folder in the output directory, for the app's library.
+    """One row per meeting folder in the output directory, for the app's library,
+    and the library's tags with their counts.
 
-    A folder is any non-hidden directory there, including ones holding only audio
-    or only crash leftovers: the app decides what each status means. A missing
-    output directory is an empty library, not an error; nothing has been
-    recorded yet.
+    Folders holding only audio or crash leftovers are listed too: the app decides
+    what each status means. Each `.ownscribe.json` is read once, for its tags and
+    its stale mark.
     """
-    base = config.output.resolved_dir
-    folders = sorted(p for p in base.iterdir() if p.is_dir() and not p.name.startswith(".")) if base.is_dir() else []
-    return {"schema": SCHEMA_VERSION, "meetings": [_row(config, folder) for folder in folders]}
+    folders = meeting_folders(config.output.resolved_dir)
+    metas = {folder: read_meta(folder) for folder in folders}
+    library = group_tags((folder, meeting_tags(folder, meta)) for folder, meta in metas.items())
+    return {
+        "schema": SCHEMA_VERSION,
+        "meetings": [_row(config, folder, metas[folder], library) for folder in folders],
+        "tags": tags_listing(library),
+    }
 
 
-def _row(config: Config, folder: Path) -> dict:
+def _row(config: Config, folder: Path, meta: dict, library: dict[str, LibraryTag]) -> dict:
     transcript = read_transcript(folder)
     result = transcript.result if transcript else None
     speakers = _speaker_labels(result)
@@ -251,12 +263,18 @@ def _row(config: Config, folder: Path) -> dict:
         "path": str(folder),
         "name_day": day.isoformat() if day else None,
         "created": _created(folder),
-        "title": folder_title(folder.name),
+        "title": _title(folder, meta),
         "duration": _duration(result),
         "speaker_count": len(speakers),
         "speakers": speakers,
-        "status": _status(config, folder),
+        "tags": in_library_spelling(meeting_tags(folder, meta), library),
+        "status": _status(config, folder, meta),
     }
+
+
+def _title(folder: Path, meta: dict) -> str:
+    """The title set for the meeting (`ownscribe title`), else its folder's."""
+    return stored_title(folder, meta) or folder_title(folder.name)
 
 
 def _speaker_labels(result: TranscriptResult | None) -> list[str]:
@@ -294,7 +312,7 @@ def _duration(result: TranscriptResult | None) -> float | None:
     return result.duration
 
 
-def _status(config: Config, directory: Path) -> dict:
+def _status(config: Config, directory: Path, meta: dict) -> dict:
     """What the folder holds (transcript, summary, audio, original-name copies) and
     whether a process is working on it.
 
@@ -317,7 +335,7 @@ def _status(config: Config, directory: Path) -> dict:
         "orig": any((directory / name).is_file() for name in ORIGINAL_NAMES),
         "busy": lock.busy,
         "holder_pid": lock.holder_pid,
-        "summary_stale": summary_is_stale(directory),
+        "summary_stale": summary_is_stale(directory, meta),
     }
 
 

@@ -36,4 +36,33 @@ final class FailureTextTests: XCTestCase {
         XCTAssertNil(FailureText.firstMeaningfulLine("\n  \n"))
         XCTAssertNil(FailureText.firstMeaningfulLine(#"{"ownscribe_progress": 1, "event": "done", "ok": false}"#))
     }
+
+    func testWholeMessageKeepsEveryLineWithoutTheErrorPrefix() {
+        let stderr = """
+            Error: Nothing changed: 1 meeting with 'ClientX' is busy now:
+              /Users/a/ownscribe/260101-kickoff
+            Try again once they have finished.
+
+            """
+        XCTAssertEqual(
+            FailureText.wholeMessage(stderr),
+            "Nothing changed: 1 meeting with 'ClientX' is busy now:\n  /Users/a/ownscribe/260101-kickoff\n"
+                + "Try again once they have finished."
+        )
+        XCTAssertNil(FailureText.wholeMessage("  \n"))
+    }
+
+    func testTheErrorLineWinsOverProgressLines() {
+        let stderr = """
+            Warning: unknown config key transcription.backend — ignored.
+            Found transcript: /Users/a/ownscribe/261121-1753/transcript.md
+            Writing the summary again.
+
+            Error: oMLX is not reachable at http://127.0.0.1:8000/v1. Is it running?
+            """
+        XCTAssertEqual(
+            FailureText.firstMeaningfulLine(stderr),
+            "Error: oMLX is not reachable at http://127.0.0.1:8000/v1. Is it running?"
+        )
+    }
 }

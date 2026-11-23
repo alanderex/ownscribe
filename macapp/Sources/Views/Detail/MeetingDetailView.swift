@@ -30,31 +30,52 @@ struct MeetingDetailView: View {
     /// Lines waiting for a name typed for "New Speaker…".
     @State private var newSpeakerLines: [Int]?
     @State private var newSpeakerName = ""
+    @State private var showsSummarize = false
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+        // The header, the tags and the tab row stay in view; only the summary or the
+        // transcript scrolls under them.
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 10) {
                     MeetingHeader(
                         row: row, language: document?.language,
-                        day: library.calendar.day(of: row), time: library.calendar.time(of: row)
+                        day: library.calendar.day(of: row), time: library.calendar.time(of: row),
+                        // An older CLI has no `title`.
+                        titleEditable: !engine.isDegraded,
+                        titleReadOnlyReason: isProcessing ? Library.titleBusyMessage : nil
                     )
-                    tabBar
-                    Divider()
-                    switch tab {
-                    case .summary: summaryBody
-                    case .transcript: transcriptBody
+                    // An older CLI has no tags.
+                    if !engine.isDegraded {
+                        MeetingTagsView(row: row, readOnlyReason: isProcessing ? Library.tagsBusyMessage : nil)
                     }
                 }
-                // A readable measure: long lines at window width are hard to follow.
-                .frame(maxWidth: 720, alignment: .leading)
-                .padding(28)
-                .frame(maxWidth: .infinity)
+                tabBar
+                summaryFailure
             }
-            .onChange(of: selectedSpeaker) { _, speaker in
-                guard let speaker, let turn = firstTurn(of: speaker) else { return }
-                chosenTab = .transcript
-                withAnimation { proxy.scrollTo(turn, anchor: .top) }
+            .readingMeasure()
+            .padding(.horizontal, 28)
+            .padding(.top, 28)
+            .padding(.bottom, 14)
+            .frame(maxWidth: .infinity)
+            Divider()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        switch tab {
+                        case .summary: summaryBody
+                        case .transcript: transcriptBody
+                        }
+                    }
+                    .readingMeasure()
+                    .padding(28)
+                    .frame(maxWidth: .infinity)
+                }
+                .onChange(of: selectedSpeaker) { _, speaker in
+                    guard let speaker, let turn = firstTurn(of: speaker) else { return }
+                    chosenTab = .transcript
+                    withAnimation { proxy.scrollTo(turn, anchor: .top) }
+                }
             }
         }
         .inspector(isPresented: $inspectorShown) { inspector }
@@ -87,6 +108,22 @@ struct MeetingDetailView: View {
             player.stop()
             saveInBackground(row.path)
         }
+        .onChange(of: jobs.ownedFolder) { previous, current in
+            // A summary run on this meeting ended: show what it wrote. The row may look
+            // the same before and after, so the reload cannot wait for it to change.
+            if previous == row.path, current == nil {
+                Task { await load() }
+            }
+        }
+        .sheet(isPresented: $showsSummarize) {
+            SummarizeSheet(
+                meetingTitle: row.title, hasSummary: row.status.hasSummary,
+                request: initialSummaryRequest
+            ) { request in
+                chosenTab = .summary
+                jobs.resummarize(folder: row.path, request: request)
+            }
+        }
         .alert("New Speaker", isPresented: newSpeakerPrompt) {
             TextField("Name", text: $newSpeakerName)
             Button("Move") { moveToTypedSpeaker() }
@@ -103,10 +140,16 @@ struct MeetingDetailView: View {
         return readOnlyReason == nil
     }
 
-    /// Why the speakers cannot be edited now. A folder whose lock state is unknown (a
-    /// volume without lock support) stays editable.
+    /// A process works on the meeting's folder: one of the app's jobs, or another
+    /// process holding its lock. A folder whose lock state is unknown (a volume without
+    /// lock support) does not count, so it stays editable.
+    private var isProcessing: Bool {
+        row.status.busy == .busy || jobs.ownedFolder == row.path
+    }
+
+    /// Why the speakers cannot be edited now.
     private var readOnlyReason: String? {
-        if row.status.busy == .busy || jobs.ownedFolder == row.path {
+        if isProcessing {
             return "Processing… Speakers can be edited when this meeting is done."
         }
         if document?.revision == nil {
@@ -248,6 +291,7 @@ struct MeetingDetailView: View {
             .labelsHidden()
             .fixedSize()
             Spacer()
+            summarizeButton
             if tab == .transcript, player.playingLine != nil {
                 Button {
                     player.stop()
@@ -264,6 +308,61 @@ struct MeetingDetailView: View {
                 }
             }
         }
+    }
+
+    /// Writes the summary with instructions, a template and a model (SummarizeSheet).
+    /// Needs a transcript, and a CLI new enough to take instructions.
+    @ViewBuilder
+    private var summarizeButton: some View {
+        if !engine.isDegraded, row.status.hasTranscript {
+            if jobs.ownedFolder == row.path {
+                ProgressView().controlSize(.small)
+                Text("Summarizing…").foregroundStyle(.secondary)
+            } else {
+                Button {
+                    showsSummarize = true
+                } label: {
+                    Label(row.status.hasSummary ? "Re-summarize…" : "Summarize…", systemImage: "text.badge.star")
+                }
+                .disabled(jobs.isRunning || isProcessing)
+                .help(jobs.isRunning || isProcessing
+                      ? "Available when the current recording or job is done."
+                      : "Write the summary with your own instructions, template and model")
+            }
+        }
+    }
+
+    /// Why the summary run on this meeting failed, in the pinned area so it shows on
+    /// either tab, until dismissed or another run starts.
+    @ViewBuilder
+    private var summaryFailure: some View {
+        if case .failed(let message) = jobs.state, jobs.failedFolder == row.path {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("The summary could not be written", systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.orange)
+                Text(message)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Summarize…") { showsSummarize = true }
+                    Button("Dismiss", action: jobs.dismissFailure)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    /// The meeting's last request, else Settings' backend, model and template.
+    private var initialSummaryRequest: SummaryRequest {
+        let settings = engine.config.summarization
+        return SummaryRequest.initial(
+            recorded: document?.summaryRequest, backend: settings.backend,
+            model: settings.model, template: settings.template
+        )
     }
 
     @ViewBuilder
@@ -293,8 +392,8 @@ struct MeetingDetailView: View {
                 ProgressView().controlSize(.small)
                 Text("Summarizing…").foregroundStyle(.secondary)
             } else {
-                Button("Re-summarize") { jobs.resummarize(folder: row.path) }
-                    .disabled(jobs.isRunning || row.status.busy == .busy)
+                Button("Re-summarize…") { showsSummarize = true }
+                    .disabled(jobs.isRunning || isProcessing)
                     .help(jobs.isRunning ? "Available when the current recording or job is done." : "")
             }
         }
@@ -375,19 +474,105 @@ struct MeetingDetailView: View {
     }
 }
 
+private extension View {
+    /// A readable measure: long lines at window width are hard to follow.
+    func readingMeasure() -> some View {
+        frame(maxWidth: 720, alignment: .leading)
+    }
+}
+
+/// The meeting's title and facts. The title can be renamed in place: the pencil or a
+/// double-click opens it for editing, Return saves it with `ownscribe title`, Esc
+/// leaves it as it was.
 struct MeetingHeader: View {
+    @Environment(Library.self) private var library
     let row: LibraryRow
     let language: String?
     let day: Date?
     let time: Date?
+    /// Whether this CLI can rename meetings at all.
+    let titleEditable: Bool
+    /// Why the title cannot change now (a job works on the meeting); nil when it can.
+    let titleReadOnlyReason: String?
+
+    @State private var isEditing = false
+    @State private var draft = ""
+    @State private var isSaving = false
+    @State private var problem: String?
+    /// The title just saved, shown until the library lists it.
+    @State private var savedTitle: String?
+    @FocusState private var fieldFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(row.title)
-                .font(.largeTitle.weight(.semibold))
-                .textSelection(.enabled)
+            if isEditing {
+                TextField("Title", text: $draft)
+                    .font(.largeTitle.weight(.semibold))
+                    .textFieldStyle(.plain)
+                    .focused($fieldFocused)
+                    .disabled(isSaving)
+                    .onSubmit(save)
+                    .onExitCommand { isEditing = false }
+                    .task { fieldFocused = true }
+                    .accessibilityLabel("Meeting title")
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(savedTitle ?? row.title)
+                        .font(.largeTitle.weight(.semibold))
+                        .onTapGesture(count: 2) { if canRename { startEditing() } }
+                    if titleEditable {
+                        Button(action: startEditing) {
+                            Image(systemName: "pencil")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(!canRename)
+                        .help(titleReadOnlyReason ?? "Rename this meeting")
+                        .accessibilityLabel("Rename meeting")
+                    }
+                }
+            }
+            if isSaving {
+                ProgressView().controlSize(.small)
+            }
+            if let problem {
+                Text(problem)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
             Text(facts)
                 .foregroundStyle(.secondary)
+        }
+        .onChange(of: row.path) {
+            isEditing = false
+            problem = nil
+            savedTitle = nil
+        }
+        .onChange(of: row.title) { savedTitle = nil }
+    }
+
+    private var canRename: Bool { titleEditable && titleReadOnlyReason == nil && !isSaving }
+
+    private func startEditing() {
+        draft = row.title
+        problem = nil
+        isEditing = true
+    }
+
+    /// An unchanged or empty title just closes the field; a refusal keeps it open.
+    private func save() {
+        let title = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, title != row.title else {
+            isEditing = false
+            return
+        }
+        isSaving = true
+        Task {
+            problem = await library.setTitle(of: row, to: title)
+            isSaving = false
+            if problem == nil {
+                savedTitle = title
+                isEditing = false
+            }
         }
     }
 

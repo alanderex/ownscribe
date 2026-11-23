@@ -17,6 +17,7 @@ from ownscribe.summarization.prompts import (
     REDUCE_SUMMARY_SYSTEM,
     format_partials,
     resolve_template,
+    with_instructions,
 )
 
 if TYPE_CHECKING:
@@ -56,6 +57,10 @@ def _group_by_budget(items: list[str], budget: int, count_tokens: TokenCounter) 
     if current:
         groups.append(current)
     return groups
+
+
+class SummarizerUnavailable(Exception):
+    """The backend cannot be used now; the message says why, for the user."""
 
 
 class Summarizer(abc.ABC):
@@ -99,9 +104,14 @@ class Summarizer(abc.ABC):
 
     # -- summarization -------------------------------------------------------
 
-    def summarize(self, transcript_text: str) -> str:
-        """Summarize a transcript, splitting it up when it does not fit the window."""
+    def summarize(self, transcript_text: str, instructions: str = "") -> str:
+        """Summarize a transcript, splitting it up when it does not fit the window.
+
+        `instructions` are the user's own for this summary; they apply to every
+        chunk and to the merge step alike.
+        """
         system, prompt = resolve_template(self._config.template, self._templates)
+        system = with_instructions(system, instructions)
         text = transcript_text.strip()
         budget = self._input_budget(system, prompt)
 
@@ -173,6 +183,15 @@ class Summarizer(abc.ABC):
     @abc.abstractmethod
     def is_available(self) -> bool:
         """Check if the summarization backend is reachable."""
+
+    def problem(self) -> str | None:
+        """Why this summarizer cannot run now, or None when it can.
+
+        Callers print it instead of guessing: "not reachable" was printed for a
+        refused API key and a local model name that is not a GGUF alike. Backends
+        that can tell their failures apart override it.
+        """
+        return None if self.is_available() else "The summarization backend is not available."
 
     def close(self) -> None:  # noqa: B027 — intentional optional hook, not abstract
         """Release any native resources. No-op by default; must be idempotent."""

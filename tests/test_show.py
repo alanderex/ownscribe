@@ -16,6 +16,7 @@ from click.testing import CliRunner
 from ownscribe.cli import cli
 from ownscribe.config import Config
 from ownscribe.locks import LOCK_NAME
+from ownscribe.meeting_meta import META_NAME
 from ownscribe.output.json_output import format_summary_json, format_transcript_json
 from ownscribe.output.markdown import format_summary, format_transcript
 from ownscribe.show import build_turns, folder_day, folder_title, meeting_detail, meeting_rows, speaker_stats
@@ -151,6 +152,24 @@ class TestSpeakerStats:
 
 
 class TestMeetingDetail:
+    def test_reports_what_the_summary_was_written_with(self, config):
+        from ownscribe.meeting_meta import record_summary
+
+        folder = _folder(config)
+        assert meeting_detail(config, folder)["summary_request"] is None
+        record_summary(folder, backend="omlx", model="gemma", template="brief", instructions="In German.")
+        assert meeting_detail(config, folder)["summary_request"] == {
+            "backend": "omlx",
+            "model": "gemma",
+            "template": "brief",
+            "instructions": "In German.",
+        }
+
+    def test_tags_as_the_folder_spells_them(self, config):
+        folder = _folder(config)
+        (folder / META_NAME).write_text(json.dumps({"schema": 1, "tags": ["clientx", "Q4"]}))
+        assert meeting_detail(config, folder)["tags"] == ["clientx", "Q4"]
+
     def test_markdown_meeting(self, config, meeting):
         folder = _folder(config)
         (folder / "transcript.md").write_text(format_transcript(meeting))
@@ -163,6 +182,7 @@ class TestMeetingDetail:
         assert detail["title"] == "Budget Review"
         assert detail["language"] == "en"
         assert detail["duration"] == 40.0
+        assert detail["tags"] == []
         assert len(detail["turns"]) == 3
         assert detail["turns"][1] == {
             "ordinal": 1,
@@ -368,7 +388,19 @@ class TestMeetingRows:
         assert row["speaker_count"] == len(row["speakers"])
 
     def test_missing_output_dir_is_an_empty_library(self, config):
-        assert meeting_rows(config) == {"schema": 1, "meetings": []}
+        assert meeting_rows(config) == {"schema": 1, "meetings": [], "tags": []}
+
+    def test_rows_carry_tags_in_the_library_spelling(self, config):
+        first = _folder(config, "260101-kickoff")
+        second = _folder(config, "260102-sync")
+        _folder(config, "260103-review")
+        (first / META_NAME).write_text(json.dumps({"schema": 1, "tags": ["ClientX"]}))
+        (second / META_NAME).write_text(json.dumps({"schema": 1, "tags": ["q4", "clientx", "CLIENTX"]}))
+
+        payload = meeting_rows(config)
+
+        assert [row["tags"] for row in payload["meetings"]] == [["ClientX"], ["q4", "ClientX"], []]
+        assert payload["tags"] == [{"name": "ClientX", "count": 2}, {"name": "q4", "count": 1}]
 
     def test_two_hundred_hour_long_meetings_list_fast(self, config, in_ci):
         """The plan's budget for `show --list`: 300 ms for 200 folders.

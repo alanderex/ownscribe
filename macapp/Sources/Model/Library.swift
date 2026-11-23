@@ -9,6 +9,8 @@ import Observation
 final class Library {
     /// Every meeting folder, from `ownscribe show --list --json`.
     private(set) var rows: [LibraryRow] = []
+    /// The library's tags with their meeting counts, by name.
+    private(set) var tags: [LibraryTag] = []
     /// Why the last listing failed, while it keeps failing.
     private(set) var listFailure: String?
     /// Summary text by folder path, for the search field.
@@ -65,7 +67,9 @@ final class Library {
         if result.ok {
             let data = Data(result.stdout.utf8)
             do {
-                rows = try await Task.detached { try LibraryListing.decode(data) }.value
+                let listing = try await Task.detached { try LibraryListing.decode(data) }.value
+                rows = listing.meetings
+                tags = listing.tags
                 listFailure = nil
                 await indexSummaries()
             } catch {
@@ -83,6 +87,7 @@ final class Library {
         let folder = MeetingLoader.outputDir(engine.config)
         let meetings = await Task.detached { MeetingLoader.load(from: folder) }.value
         rows = meetings.map(Self.plainRow)
+        tags = []
         listFailure = nil
         await indexSummaries()
     }
@@ -127,6 +132,49 @@ final class Library {
     /// The meeting was opened, in the window or the menu.
     func markSeen(_ path: String) {
         unseen.remove(path)
+    }
+
+    /// What a meeting's tags show while a process works on its folder.
+    static let tagsBusyMessage = "Processing… Tags can be changed when this meeting is done."
+    /// What a meeting's title shows while a process works on its folder.
+    static let titleBusyMessage = "Processing… The title can be changed when this meeting is done."
+
+    /// Gives a meeting a title of its own with `ownscribe title`, then lists the
+    /// library again. Returns why it failed, or nil.
+    func setTitle(of row: LibraryRow, to title: String) async -> String? {
+        let result = await engine.cli.setTitle(row.url, title)
+        guard result.ok else {
+            if result.exitCode == OwnscribeCLI.busyExitCode { return Self.titleBusyMessage }
+            return FailureText.firstMeaningfulLine(result.stderr)
+                ?? "Renaming the meeting failed (exit \(result.exitCode))."
+        }
+        refresh()
+        return nil
+    }
+
+    /// Adds and removes a meeting's tags with `ownscribe tag`, then lists the library
+    /// again so its rows and tag counts follow. Returns why it failed, or nil.
+    func editTags(of row: LibraryRow, add: [String], remove: [String]) async -> String? {
+        let result = await engine.cli.tag(row.url, add: add, remove: remove)
+        guard result.ok else {
+            if result.exitCode == OwnscribeCLI.busyExitCode { return Self.tagsBusyMessage }
+            return FailureText.firstMeaningfulLine(result.stderr)
+                ?? "Changing the tags failed (exit \(result.exitCode))."
+        }
+        refresh()
+        return nil
+    }
+
+    /// Removes a tag from every meeting with `ownscribe tags --delete`, then lists the
+    /// library again, also after a refusal, which may come after some meetings lost
+    /// the tag. Returns why it failed (for busy meetings, which ones), or nil.
+    func deleteTag(_ tag: LibraryTag) async -> String? {
+        let result = await engine.cli.deleteTag(tag.name)
+        refresh()
+        guard result.ok else {
+            return FailureText.wholeMessage(result.stderr) ?? "Deleting the tag failed (exit \(result.exitCode))."
+        }
+        return nil
     }
 
     /// Names given to speakers anywhere in the library, offered when naming speakers.

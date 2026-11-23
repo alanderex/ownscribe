@@ -38,10 +38,10 @@ device = "auto"           # "auto" (mps if available), "mps", or "cpu"
 
 [summarization]
 enabled = true
-backend = "local"         # "local" (built-in, no server needed), "ollama", or "openai"
-model = "phi-4-mini"      # local: "phi-4-mini", path to GGUF, or hf:owner/repo/file.gguf; ollama/openai: model name
-# host = "http://localhost:11434"  # only for ollama/openai backends
-# api_key = ""            # only for openai backend; required by servers like oMLX (or set OPENAI_API_KEY)
+backend = "local"         # "local" (built-in, no server needed), "ollama", "openai", or "omlx"
+model = "phi-4-mini"      # local: "phi-4-mini", path to GGUF, or hf:owner/repo/file.gguf; servers: model name
+# host = ""               # server backends; empty = default (ollama/openai: localhost:11434, omlx: 127.0.0.1:8000/v1)
+# api_key = ""            # openai and omlx backends; oMLX requires one (or set OPENAI_API_KEY)
 # template = "meeting"    # built-in: "meeting", "lecture", or "brief"
 # context_size = 0        # context window in tokens; 0 = auto-detect (8192 for local). Longer
                           # transcripts are summarized in chunks and merged, whatever the size.
@@ -88,15 +88,40 @@ class DiarizationConfig:
     device: str = "auto"
 
 
+#: Where a server backend is reached when summarization.host is empty.
+_DEFAULT_HOSTS = {
+    "ollama": "http://localhost:11434",
+    "openai": "http://localhost:11434",
+    # oMLX's own default address.
+    "omlx": "http://127.0.0.1:8000/v1",
+}
+
+
 @dataclass
 class SummarizationConfig:
     enabled: bool = True
     backend: str = "local"
     model: str = "phi-4-mini"
-    host: str = "http://localhost:11434"
+    host: str = ""
     api_key: str = ""
     template: str = ""
     context_size: int = 0
+
+    @property
+    def resolved_host(self) -> str:
+        """The server to talk to: `host` when set, else the backend's default.
+
+        Backends listen on different ports, so one default for every backend would
+        be wrong for most of them.
+        """
+        if self.host:
+            return self.host
+        try:
+            return _DEFAULT_HOSTS[self.backend]
+        except KeyError:
+            raise ValueError(
+                f"summarization.host is empty and the {self.backend!r} backend has no default server."
+            ) from None
 
 
 @dataclass
@@ -158,21 +183,27 @@ class Config:
         return config
 
 
+#: Every summarization backend name the config accepts.
+SUMMARIZATION_BACKENDS = ("local", "ollama", "openai", "omlx")
+
 _ENUMS: dict[tuple[str, str], tuple[str, ...]] = {
     ("audio", "backend"): ("coreaudio", "sounddevice"),
     ("audio", "capture_mode"): ("all", "picker"),
-    ("summarization", "backend"): ("local", "ollama", "openai"),
+    ("summarization", "backend"): SUMMARIZATION_BACKENDS,
     ("output", "format"): ("markdown", "json"),
     ("diarization", "device"): ("auto", "mps", "cpu"),
 }
 
 
-def _coerce(section: str, key: str, current, value):
+def coerce_value(section: str, key: str, current, value):
     """Coerce a TOML value to the field's declared type, or raise ValueError.
 
-    `config set` coerces; a hand-edited config.toml did not, so `mic = "false"`
-    stayed a truthy string (mic silently on) and `silence_timeout = "300"` blew up
-    much later inside a comparison.
+    The one set of rules for config values: loading applies it to config.toml, and
+    `config set` to what it is about to write. A hand-edited config.toml was not
+    checked, so `mic = "false"` stayed a truthy string (mic silently on) and
+    `silence_timeout = "300"` blew up much later inside a comparison; `config set`
+    was not checked either, so it could write a backend that loading then refused,
+    and every command failed from then on.
     """
     want = type(current)
     if isinstance(current, bool):
@@ -209,7 +240,7 @@ def _merge_section(config: Config, data: dict, section: str) -> None:
             # Silently dropping these meant a typo like `hf_tokn` did nothing at all.
             click.echo(f"Warning: unknown config key {section}.{k} — ignored.", err=True)
             continue
-        setattr(target, k, _coerce(section, k, getattr(target, k), v))
+        setattr(target, k, coerce_value(section, k, getattr(target, k), v))
 
 
 def _merge_toml(config: Config, data: dict) -> Config:

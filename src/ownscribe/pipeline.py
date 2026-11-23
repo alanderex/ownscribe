@@ -15,9 +15,9 @@ from pathlib import Path
 
 import click
 
-from ownscribe.config import Config
+from ownscribe.config import SUMMARIZATION_BACKENDS, Config
 from ownscribe.locks import LOCK_NAME, folder_lock, probe
-from ownscribe.meeting_meta import clear_summary_stale
+from ownscribe.meeting_meta import record_summary
 from ownscribe.progress import (
     DownloadProgressEvent,
     PipelineProgress,
@@ -330,12 +330,10 @@ def _validate_backends(config: Config) -> None:
     meeting is over, so a typo in config.toml used to cost the user the whole
     recording before surfacing.
     """
-    from ownscribe.summarization import KNOWN_BACKENDS
-
-    if config.summarization.enabled and config.summarization.backend not in KNOWN_BACKENDS:
+    if config.summarization.enabled and config.summarization.backend not in SUMMARIZATION_BACKENDS:
         raise click.ClickException(
             f"Unknown summarization backend {config.summarization.backend!r}. "
-            f"Expected one of: {', '.join(KNOWN_BACKENDS)}."
+            f"Expected one of: {', '.join(SUMMARIZATION_BACKENDS)}."
         )
 
 
@@ -561,14 +559,36 @@ def _load_transcript_text(transcript_path: Path) -> str:
     return result.speaker_text
 
 
-def run_summarize(config: Config, transcript_file: str, *, in_place: bool = False) -> None:
+def run_summarize(config: Config, transcript_file: str, *, in_place: bool = False, instructions: str = "") -> None:
     """Summarize a transcript file and save the summary alongside the input.
 
     `in_place` writes the meeting's summary again (`resume --resummarize`): into the
     existing summary file's format, keeping the folder's name. Otherwise the format
     follows output.format and a generated title may rename the folder.
+    `instructions` are the user's own for this summary (`resume --instructions`).
+
+    Holds the folder's lock, like every writer of `.ownscribe.json`: the summary
+    clears its stale mark there, and a `tag` or `edit-speakers` running meanwhile
+    would otherwise lose its own change to that file.
     """
     transcript_path = Path(transcript_file).resolve()
+    with folder_lock(transcript_path.parent, "summarize"):
+        _summarize(config, transcript_path, in_place=in_place, instructions=instructions)
+
+
+def _record_summary(config: Config, out_dir: Path, instructions: str) -> None:
+    """Note in the folder what its new summary was written with."""
+    summarization = config.summarization
+    record_summary(
+        out_dir,
+        backend=summarization.backend,
+        model=summarization.model,
+        template=summarization.template or "meeting",
+        instructions=instructions,
+    )
+
+
+def _summarize(config: Config, transcript_path: Path, *, in_place: bool, instructions: str) -> None:
     transcript_text = _load_transcript_text(transcript_path)
 
     try:
@@ -576,18 +596,8 @@ def run_summarize(config: Config, transcript_file: str, *, in_place: bool = Fals
     except ImportError as exc:
         click.echo(f"Error: {exc}", err=True)
         raise SystemExit(1) from None
-    if not summarizer.is_available():
-        if config.summarization.backend == "local":
-            click.echo(
-                f"Error: Local summarization model '{config.summarization.model}' is not available.",
-                err=True,
-            )
-        else:
-            click.echo(
-                f"Error: {config.summarization.backend} is not reachable at {config.summarization.host}. "
-                "Is the server running?",
-                err=True,
-            )
+    if problem := summarizer.problem():
+        click.echo(f"Error: {problem}", err=True)
         raise SystemExit(1)
 
     from ownscribe.output.markdown import format_summary
@@ -620,7 +630,7 @@ def run_summarize(config: Config, transcript_file: str, *, in_place: bool = Fals
                         err=True,
                     )
                     raise SystemExit(1) from None
-            summary = summarizer.summarize(transcript_text)
+            summary = summarizer.summarize(transcript_text, instructions)
             title_slug = "" if in_place else _generate_title_slug(summary, summarizer)
             progress.complete("summarizing")
     finally:
@@ -636,7 +646,7 @@ def run_summarize(config: Config, transcript_file: str, *, in_place: bool = Fals
         summary_body = summary_md
     summary_path = out_dir / f"summary.{summary_ext}"
     summary_path.write_text(summary_body)
-    clear_summary_stale(out_dir)
+    _record_summary(config, out_dir, instructions)
 
     if title_slug:
         out_dir, old_out_dir = _rename_output_dir(out_dir, title_slug), out_dir
@@ -684,7 +694,8 @@ def _do_transcribe_and_summarize(
     summary = None
     summary_str = None
     title_slug = ""
-    sum_unavailable = False
+    #: Why the summarizer could not run; the transcript is kept either way.
+    sum_unavailable: str | None = None
     sum_failed = False
 
     local_sum = sum_enabled and config.summarization.backend == "local"
@@ -718,9 +729,8 @@ def _do_transcribe_and_summarize(
                 click.echo(f"Error: {exc}", err=True)
                 raise SystemExit(1) from None
             try:
-                if not summarizer.is_available():
-                    sum_unavailable = True
-                else:
+                sum_unavailable = summarizer.problem()
+                if not sum_unavailable:
                     try:
                         progress.begin("summarizing")
                         if local_sum:
@@ -735,7 +745,7 @@ def _do_transcribe_and_summarize(
                         _, summary_str = _format_output(config, result, summary)
                         summary_path = out_dir / f"summary.{ext}"
                         summary_path.write_text(summary_str or summary)
-                        clear_summary_stale(out_dir)
+                        _record_summary(config, out_dir, "")
                         title_slug = _generate_title_slug(summary, summarizer)
                         progress.complete("summarizing")
                     except Exception:
@@ -748,19 +758,7 @@ def _do_transcribe_and_summarize(
     click.echo(f"Transcript saved to {transcript_path}")
 
     if sum_unavailable:
-        if config.summarization.backend == "local":
-            click.echo(
-                f"\nWarning: Local summarization model '{config.summarization.model}' is not available. "
-                "Skipping summarization.",
-                err=True,
-            )
-        else:
-            click.echo(
-                f"\nWarning: {config.summarization.backend} is not reachable "
-                f"at {config.summarization.host}. "
-                "Skipping summarization. Is the server running?",
-                err=True,
-            )
+        click.echo(f"\nWarning: {sum_unavailable} Skipping summarization.", err=True)
     elif sum_failed:
         click.echo(
             f"\nWarning: Summarization failed. "
@@ -887,11 +885,12 @@ def _find_summary(directory: Path) -> Path | None:
     return None
 
 
-def run_resume(config: Config, directory: str, *, resummarize: bool = False) -> None:
+def run_resume(config: Config, directory: str, *, resummarize: bool = False, instructions: str = "") -> None:
     """Resume a partially-completed pipeline in the given directory.
 
-    `resummarize` writes the summary again from the current transcript, for a
-    summary written before speakers were moved; the folder keeps its name.
+    `resummarize` writes the summary (again) from the current transcript, for a
+    summary written before speakers were moved or one asked for with the user's
+    own `instructions`; the folder keeps its name.
     """
     dir_path = Path(directory).resolve()
     if not dir_path.is_dir():
@@ -900,19 +899,19 @@ def run_resume(config: Config, directory: str, *, resummarize: bool = False) -> 
 
     with folder_lock(dir_path, "resume"):
         if resummarize:
-            _resummarize(config, dir_path)
+            _resummarize(config, dir_path, instructions)
         else:
             _resume_locked(config, dir_path)
 
 
-def _resummarize(config: Config, dir_path: Path) -> None:
+def _resummarize(config: Config, dir_path: Path, instructions: str) -> None:
     transcript = _find_transcript(dir_path)
     if transcript is None:
         click.echo(f"Error: No transcript in {dir_path} to summarize.", err=True)
         raise SystemExit(1)
     click.echo(f"Found transcript: {transcript}")
     click.echo("Writing the summary again.\n")
-    run_summarize(config, str(transcript), in_place=True)
+    run_summarize(config, str(transcript), in_place=True, instructions=instructions)
 
 
 def _resume_locked(config: Config, dir_path: Path) -> None:

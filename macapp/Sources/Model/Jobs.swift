@@ -40,6 +40,9 @@ final class Jobs {
     private(set) var ownedFolder: String?
     /// The last run that finished, and where its meeting ended up.
     private(set) var lastFinished: FinishedRun?
+    /// The meeting whose summary run failed, while that failure is shown: the
+    /// meeting says why, not only the sidebar.
+    private(set) var failedFolder: String?
 
     struct FinishedRun: Equatable {
         let run: Int
@@ -95,11 +98,12 @@ final class Jobs {
         launch(arguments: flags, kind: .recording, folder: nil)
     }
 
-    /// Write a meeting's summary again from its transcript, after speakers were moved
-    /// (`resume DIR --resummarize`). The folder counts as owned until it is done.
-    func resummarize(folder: String) {
+    /// Write a meeting's summary (again) from its transcript with the template, model
+    /// and instructions in `request` (`resume DIR --resummarize`). The folder counts as
+    /// owned until it is done.
+    func resummarize(folder: String, request: SummaryRequest) {
         guard state != .running else { return }
-        launch(arguments: ["resume", folder, "--resummarize"], kind: .resummarizing, folder: folder)
+        launch(arguments: request.resumeArguments(folder: folder), kind: .resummarizing, folder: folder)
     }
 
     private func launch(arguments: [String], kind: Kind, folder: String?) {
@@ -107,6 +111,7 @@ final class Jobs {
         activeStepKey = nil
         autoStopped = false
         ownedFolder = folder
+        failedFolder = nil
         self.kind = kind
         state = .running
         runToken &+= 1
@@ -142,6 +147,7 @@ final class Jobs {
 
     func dismissFailure() {
         if case .failed = state { state = .idle }
+        failedFolder = nil
     }
 
     /// Fold one NDJSON progress event from the CLI into the UI state.
@@ -197,6 +203,7 @@ final class Jobs {
         // acting on it would tear down whatever is running now.
         guard token == runToken else { return }
         running = nil
+        let folder = ownedFolder
         ownedFolder = nil
         onCaptureEnded?()
         defer { onRunEnded?() }
@@ -205,6 +212,7 @@ final class Jobs {
             let what = kind == .recording ? "Recording" : "Summarizing"
             state = .failed(FailureText.firstMeaningfulLine(result.stderr)
                 ?? "\(what) failed (exit \(result.exitCode)).")
+            if kind == .resummarizing { failedFolder = folder }
             return
         }
         // The user asked for this summary on the meeting in front of them: no badge,

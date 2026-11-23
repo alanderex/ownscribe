@@ -46,7 +46,7 @@ All audio, transcripts, and summaries remain local.
 - **WhisperX transcription** — fast, accurate speech-to-text with word-level timestamps
 - **Speaker diarization** — optional speaker identification via pyannote (requires HuggingFace token)
 - **Pipeline progress** — live checklist showing transcription, diarization sub-steps, and summarization progress
-- **Local LLM summarization** — structured meeting notes with a built-in model (Phi-4-mini); also supports Ollama, LM Studio, or any OpenAI-compatible server
+- **Local LLM summarization** — structured meeting notes with a built-in model (Phi-4-mini); also supports oMLX, Ollama, LM Studio, or any OpenAI-compatible server
 - **Summarization templates** — built-in presets for meetings, lectures, and quick briefs; define your own in config
 - **Ask your meetings** — ask natural-language questions across all your meeting notes; uses a two-stage LLM pipeline with keyword fallback
   <br><img src="docs/demo-ask.gif" alt="ownscribe ask demo" width="700">
@@ -88,10 +88,11 @@ Works with any app that outputs audio through Core Audio (Zoom, Teams, Meet, etc
 
 A native SwiftUI app lives in [`macapp/`](macapp/README.md): a recorder in the
 menu bar and a window with your meetings, their summaries and transcripts,
-playback from any transcript line, and a speaker editor to name, merge, and move
-lines between speakers. It drives this CLI as a subprocess — config, recordings
-and output are shared — and renders live pipeline progress. See
-`macapp/README.md` for building it.
+playback from any transcript line, a speaker editor to name, merge, and move
+lines between speakers, tags to group meetings and filter the library, editable
+titles, and summaries written on demand with your own instructions. It
+drives this CLI as a subprocess — config, recordings and output are shared — and
+renders live pipeline progress. See `macapp/README.md` for building it.
 
 ## Installation
 
@@ -109,7 +110,7 @@ The built-in local model works out of the box. If you'd rather call a hosted bac
 
 ```bash
 uv add 'ownscribe[ollama]'   # use Ollama
-uv add 'ownscribe[openai]'   # use any OpenAI-compatible server (LM Studio, llama-server, etc.)
+uv add 'ownscribe[openai]'   # use oMLX or any OpenAI-compatible server (LM Studio, llama-server, etc.)
 uv add 'ownscribe[all]'      # install both
 ```
 
@@ -197,14 +198,20 @@ ownscribe transcribe recording.wav # transcribe an audio or video file: wav/mp3/
 ownscribe summarize transcript.md  # summarize a transcript (saves alongside the input)
 ownscribe resume ./260220-1736    # resume a partial run, or process a folder's audio/video recording
 ownscribe resume ./260220-1736 --resummarize  # write the summary again (e.g. after moving speakers)
+ownscribe resume ./260220-1736 --resummarize --instructions "Focus on the budget" --template brief --summary-model <name>
 ownscribe ask "question"           # search your meetings with a natural-language question
 ownscribe show ./260220-1736 --json # describe a meeting folder as JSON: turns, speakers, status
-ownscribe show --list --json        # list every meeting folder as JSON: day, title, duration, status
+ownscribe show --list --json        # list every meeting folder as JSON: day, title, duration, tags, status
+ownscribe models --json             # list the models the omlx or openai summarization server offers
 ownscribe list-speakers transcript.md                       # list diarized speaker labels (JSON)
 ownscribe rename-speakers transcript.md --map SPEAKER_00=Anna # name speakers in a transcript
 ownscribe edit-speakers ./260220-1736 --map SPEAKER_00=Anna  # rename or merge speakers in transcript + summary
 ownscribe edit-speakers ./260220-1736 --revert              # undo every speaker edit in that folder
 ownscribe edit-speakers ./260220-1736 --assign 42=Anna --revision <rev>  # move one transcript line to Anna
+ownscribe tag ./260220-1736 --add ClientX --remove Draft  # tag a meeting (an existing tag's spelling is kept)
+ownscribe tags --json               # every tag with its number of meetings (JSON)
+ownscribe title ./260220-1736 "Q2 Sales Review"  # a title of its own, shown as typed (the folder keeps its name)
+ownscribe tags --delete ClientX     # remove a tag from every meeting
 ownscribe config                   # open config file in $EDITOR
 ownscribe config get               # print effective config as JSON
 ownscribe config set summarization.backend openai           # set a value (keeps comments)
@@ -265,10 +272,10 @@ device = "auto"           # "auto" (mps if available), "mps", or "cpu"
 
 [summarization]
 enabled = true
-backend = "local"         # "local" (built-in, no server needed), "ollama", or "openai"
-model = "phi-4-mini"      # local: "phi-4-mini", path to GGUF, or hf:owner/repo/file.gguf; ollama/openai: model name
-# host = "http://localhost:11434"  # only for ollama/openai backends
-# api_key = ""            # only for openai backend; required by servers like oMLX (or set OPENAI_API_KEY)
+backend = "local"         # "local" (built-in, no server needed), "ollama", "openai", or "omlx"
+model = "phi-4-mini"      # local: "phi-4-mini", path to GGUF, or hf:owner/repo/file.gguf; servers: model name
+# host = ""               # server backends; empty = default (ollama/openai: localhost:11434, omlx: 127.0.0.1:8000/v1)
+# api_key = ""            # openai and omlx backends; oMLX requires one (or set OPENAI_API_KEY)
 # template = "meeting"    # "meeting", "lecture", "brief", or a custom name
 # context_size = 0        # context window in tokens; 0 = auto-detect (8192 for local). Longer
                           # transcripts are summarized in chunks and merged, whatever the size.
@@ -316,6 +323,20 @@ segment boundaries, and the partial notes are then merged into one summary under
 custom templates included. Shorter meetings are summarized in a single pass as before. Set
 `context_size` in `[summarization]` if a model's window should not be auto-detected; for the local
 backend it also sets the window the model is loaded with.
+
+### oMLX
+
+oMLX serves MLX models on Apple silicon through an OpenAI-compatible API. To
+summarize with a model it serves, set in `[summarization]`:
+
+```toml
+backend = "omlx"
+model = "..."             # a model name oMLX serves: `ownscribe models --json` lists them
+api_key = "..."           # oMLX's API key (or set OPENAI_API_KEY)
+```
+
+`host` defaults to `http://127.0.0.1:8000/v1`, oMLX's own address. ownscribe does not ask oMLX for
+the model's context window, so `context_size` stays 8192 tokens unless you set it.
 
 ## Speaker Diarization
 

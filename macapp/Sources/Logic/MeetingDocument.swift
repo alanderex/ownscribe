@@ -74,10 +74,14 @@ struct MeetingDocument: Decodable, Equatable {
     let turns: [Turn]
     let speakers: [Speaker]
     let status: LibraryRow.Status
+    /// What the current summary was written with; nil from an older CLI or for a
+    /// summary from before it was recorded.
+    let summaryRequest: SummaryRequest?
 
     enum CodingKeys: String, CodingKey {
         case schema, title, language, duration, revision, turns, speakers, status
         case standardLayout = "standard_layout"
+        case summaryRequest = "summary_request"
     }
 
     static func decode(_ data: Data) throws -> MeetingDocument {

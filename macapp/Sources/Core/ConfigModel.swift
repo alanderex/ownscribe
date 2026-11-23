@@ -18,6 +18,12 @@ struct OwnscribeConfig: Codable, Equatable {
     var diarization = Diarization()
     var summarization = Summarization()
     var output = Output()
+    /// Custom summary templates from config.toml, by name. Optional like secretsSet:
+    /// a CLI that predates it must still decode.
+    var templates: [String: Template]?
+
+    /// Only the names matter here; the prompts stay with the CLI.
+    struct Template: Codable, Equatable {}
 
     struct Audio: Codable, Equatable {
         var backend = "coreaudio"
@@ -48,7 +54,8 @@ struct OwnscribeConfig: Codable, Equatable {
         var enabled = true
         var backend = "local"
         var model = "phi-4-mini"
-        var host = "http://localhost:11434"
+        /// Empty: the CLI uses the backend's default server.
+        var host = ""
         var apiKey = ""
         var template = ""
         var contextSize = 0

@@ -182,6 +182,14 @@ class TestOriginals:
         assert (markdown_folder / "summary.md").read_bytes() == summary
         assert not list(markdown_folder.glob("*.orig"))
 
+    def test_revert_forgets_what_the_replaced_summary_was_written_with(self, markdown_folder):
+        from ownscribe.meeting_meta import read_meta, record_summary
+
+        edit_speakers(markdown_folder, renames={"SPEAKER_1": "Anna"})
+        record_summary(markdown_folder, backend="omlx", model="m", template="meeting", instructions="x")
+        revert_speaker_edits(markdown_folder)
+        assert "summary_request" not in read_meta(markdown_folder)
+
     def test_revert_without_an_edit_is_refused(self, markdown_folder):
         with pytest.raises(click.ClickException, match="nothing to restore"):
             revert_speaker_edits(markdown_folder)

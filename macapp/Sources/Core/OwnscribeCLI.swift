@@ -69,13 +69,15 @@ final class OwnscribeCLI {
     /// but not tagged reaches nobody. v0.15.2 predates helper checksum verification;
     /// v0.15.3 is the first tag that contains it. v0.16.0 is the first with `show`
     /// and the folder events the window relies on; v0.17.0 the first with
-    /// `edit-speakers`, the folder lock and `resume --resummarize`.
+    /// `edit-speakers`, the folder lock and `resume --resummarize`; v0.18.0 the first
+    /// with tags (`tag`, `tags`, tags in `show`), `title`, `models`, the omlx backend
+    /// and `resume --instructions/--summary-model`.
     ///
     /// This is deliberately NOT the app's own version. CFBundleShortVersionString
     /// tracks the bundle; this tracks the CLI the bundle installs. A Swift-only
     /// release bumps the former and leaves this alone — otherwise needsUpgrade
     /// fires and every user reinstalls ownscribe for no change at all.
-    static let macappRelease = "macapp-v0.17.0"
+    static let macappRelease = "macapp-v0.18.0"
 
     private static let pipSpec =
         "ownscribe[all] @ git+https://github.com/alanderex/ownscribe@\(macappRelease)"
@@ -90,6 +92,10 @@ final class OwnscribeCLI {
     /// build-app.sh --run uses, does not pass the environment to the app. The stable
     /// build ignores it, so a stray key can never change what users run.
     static let cliSpecOverrideKey = "OWNSCRIBE_CLI_SPEC"
+
+    /// The exit code of a command refused because another process works on the
+    /// meeting folder (EX_TEMPFAIL, src/ownscribe/locks.py).
+    static let busyExitCode: Int32 = 75
 
     /// What install() installs and the stamp must match: the override in a variant
     /// build that sets one, the release tag otherwise. Removing the key therefore
@@ -225,8 +231,34 @@ final class OwnscribeCLI {
         return try await Task.detached { try MeetingDocument.decode(data) }.value
     }
 
+    /// The models the configured omlx or openai summarization server offers. Throws
+    /// with the CLI's reason (not running, key refused) when it cannot list them.
+    func models() async throws -> [String] {
+        let result = await run(["models", "--json"])
+        guard result.ok else {
+            throw CLIError.command("models", FailureText.wholeMessage(result.stderr) ?? "exit \(result.exitCode)")
+        }
+        let data = Data(result.stdout.utf8)
+        return try ServerModels.decode(data).models
+    }
+
     /// Saves speaker edits: renames, merges and line moves, as one SpeakerDraft's arguments.
     func editSpeakers(_ folder: URL, arguments: [String]) async -> CommandResult {
         await run(["edit-speakers", folder.path] + arguments)
+    }
+
+    /// Gives a meeting a title of its own (`ownscribe title`); the folder keeps its name.
+    func setTitle(_ folder: URL, _ title: String) async -> CommandResult {
+        await run(["title", folder.path, title])
+    }
+
+    /// Removes a tag from every meeting (`ownscribe tags --delete`).
+    func deleteTag(_ name: String) async -> CommandResult {
+        await run(["tags", "--delete", name])
+    }
+
+    /// Adds and removes a meeting's tags (`ownscribe tag`).
+    func tag(_ folder: URL, add: [String], remove: [String]) async -> CommandResult {
+        await run(["tag", folder.path] + add.flatMap { ["--add", $0] } + remove.flatMap { ["--remove", $0] })
     }
 }

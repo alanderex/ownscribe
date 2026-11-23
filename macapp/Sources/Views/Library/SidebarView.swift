@@ -6,7 +6,13 @@ struct SidebarView: View {
     @Environment(Jobs.self) private var jobs
     @Binding var selection: SidebarItem?
     let query: String
-    @State private var trashFailure: String?
+    /// A failed Move to Trash or Delete Tag, until dismissed.
+    @State private var failure: (title: String, message: String)?
+    /// The tag waiting for the user to confirm its deletion.
+    @State private var tagToDelete: LibraryTag?
+    /// The tags the Library is filtered by, one per line (see LibraryTagFilter).
+    @SceneStorage("libraryTagFilter") private var storedTagFilter = ""
+    @AppStorage("sidebar.tagsExpanded") private var tagsExpanded = true
 
     var body: some View {
         List(selection: $selection) {
@@ -16,14 +22,39 @@ struct SidebarView: View {
                         .tag(SidebarItem.activeRun)
                 }
             }
+            if !library.tags.isEmpty {
+                Section(isExpanded: $tagsExpanded) {
+                    ForEach(library.tags) { tag in
+                        // A button, not a selectable row: picking a tag never changes
+                        // which meeting is open.
+                        TagFilterRow(tag: tag, isSelected: activeTags.contains(tag.name)) {
+                            toggle(tag.name)
+                        }
+                        .contextMenu {
+                            Button("Delete Tag…", role: .destructive) { tagToDelete = tag }
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Tags")
+                        Spacer()
+                        if !activeTags.isEmpty {
+                            Button("Clear") { selectedTags = [] }
+                                .buttonStyle(.link)
+                                .font(.caption)
+                                .help("Show meetings with any tag or none")
+                        }
+                    }
+                }
+            }
             Section("Library") {
                 if let failure = library.listFailure {
                     Label(failure, systemImage: "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if sections.isEmpty && !query.isEmpty {
-                    Text("No titles or summaries match “\(query)”.")
+                if sections.isEmpty, let message = noMatchMessage {
+                    Text(message)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(sections) { section in
@@ -43,16 +74,32 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .onChange(of: library.tags) { _, tags in
+            // A tag that no meeting has any more leaves the filter, so it is not
+            // selected again should a tag of that name come back.
+            let remaining = selectedTags.intersection(tags.map(\.name))
+            if remaining != selectedTags { selectedTags = remaining }
+        }
         .safeAreaInset(edge: .top) {
             DegradedBanner()
                 .padding(.horizontal, 10)
         }
-        .alert("Couldn't move to Trash", isPresented: Binding(
-            get: { trashFailure != nil }, set: { if !$0 { trashFailure = nil } }
+        .confirmationDialog(
+            deletionQuestion, isPresented: Binding(
+                get: { tagToDelete != nil }, set: { if !$0 { tagToDelete = nil } }
+            ), titleVisibility: .visible, presenting: tagToDelete
+        ) { tag in
+            Button("Delete Tag", role: .destructive) { delete(tag) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Only the tag is removed; the meetings stay as they are.")
+        }
+        .alert(failure?.title ?? "", isPresented: Binding(
+            get: { failure != nil }, set: { if !$0 { failure = nil } }
         )) {
-            Button("OK") { trashFailure = nil }
+            Button("OK") { failure = nil }
         } message: {
-            Text(trashFailure ?? "")
+            Text(failure?.message ?? "")
         }
     }
 
@@ -67,22 +114,94 @@ struct SidebarView: View {
                 try library.moveToTrash(row)
                 if selection == .meeting(row.path) { selection = nil }
             } catch {
-                trashFailure = error.localizedDescription
+                failure = ("Couldn't move to Trash", error.localizedDescription)
             }
         }
     }
 
     private var sections: [DaySection] {
+        let tags = activeTags
         let matching = library.rows.filter {
-            LibrarySearch.matches($0, query: query, summary: library.summaries[$0.path])
+            LibraryTagFilter.matches($0, selected: tags)
+                && LibrarySearch.matches($0, query: query, summary: library.summaries[$0.path])
         }
         return library.calendar.sections(matching, excluding: Set([jobs.ownedFolder].compactMap { $0 }))
+    }
+
+    private var selectedTags: Set<String> {
+        get { LibraryTagFilter.decode(storedTagFilter) }
+        nonmutating set { storedTagFilter = LibraryTagFilter.encode(newValue) }
+    }
+
+    /// The selected tags the library still has. A stored selection never hides
+    /// meetings behind a tag that is gone, with no Tags section left to clear it.
+    private var activeTags: Set<String> {
+        selectedTags.intersection(library.tags.map(\.name))
+    }
+
+    private var deletionQuestion: String {
+        guard let tag = tagToDelete else { return "" }
+        return "Remove “\(tag.name)” from \(tag.count == 1 ? "1 meeting" : "\(tag.count) meetings")?"
+    }
+
+    private func delete(_ tag: LibraryTag) {
+        Task {
+            if let problem = await library.deleteTag(tag) {
+                failure = ("Couldn't delete “\(tag.name)”", problem)
+            }
+        }
+    }
+
+    private func toggle(_ tag: String) {
+        var tags = activeTags
+        if tags.remove(tag) == nil { tags.insert(tag) }
+        selectedTags = tags
+    }
+
+    /// Why the Library is empty while a filter or search is on.
+    private var noMatchMessage: String? {
+        let tagged = activeTags.count == 1 ? "No meetings with this tag" : "No meetings with these tags"
+        switch (activeTags.isEmpty, query.isEmpty) {
+        case (true, true): return nil
+        case (true, false): return "No titles or summaries match “\(query)”."
+        case (false, true): return tagged + "."
+        case (false, false): return tagged + " match “\(query)”."
+        }
     }
 
     private var hasActiveRun: Bool {
         if recorder.phase != .idle || jobs.isRunning { return true }
         if case .failed = jobs.state { return true }
         return false
+    }
+}
+
+/// A tag in the sidebar: picking it shows only meetings with it (or with any other
+/// picked tag).
+private struct TagFilterRow: View {
+    let tag: LibraryTag
+    let isSelected: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                    .accessibilityHidden(true)
+                Text(tag.name)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(tag.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(tag.name), \(tag.count == 1 ? "1 meeting" : "\(tag.count) meetings")")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .help(isSelected ? "Stop showing only meetings tagged \(tag.name)" : "Show meetings tagged \(tag.name)")
     }
 }
 

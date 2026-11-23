@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 import openai
 
 from ownscribe.config import SummarizationConfig
-from ownscribe.summarization.base import Summarizer
+from ownscribe.summarization.base import Summarizer, SummarizerUnavailable
 from ownscribe.summarization.prompts import clean_response
 
 if TYPE_CHECKING:
@@ -23,9 +23,11 @@ class OpenAISummarizer(Summarizer):
 
     def __init__(self, config: SummarizationConfig, templates: dict | None = None) -> None:
         super().__init__(config, templates)
-        base_url = config.host
+        base_url = config.resolved_host
         if not base_url.endswith("/v1"):
             base_url = base_url.rstrip("/") + "/v1"
+        self._base_url = base_url
+        self._label = "oMLX" if config.backend == "omlx" else "The OpenAI-compatible server"
         # Most local servers ignore the key; servers that require auth (e.g. oMLX)
         # read it from config.api_key or the OPENAI_API_KEY env var.
         api_key = config.api_key or "not-needed"
@@ -68,12 +70,45 @@ class OpenAISummarizer(Summarizer):
                 continue
         return ""
 
-    def is_available(self) -> bool:
+    @property
+    def base_url(self) -> str:
+        """The API address in use: the resolved host, ending in /v1."""
+        return self._base_url
+
+    def served_models(self) -> list[str]:
+        """The ids of the models the server offers, sorted by name.
+
+        Raises SummarizerUnavailable saying why the server could not be asked.
+        """
         try:
-            self._client.models.list()
-            return True
-        except Exception:
-            return False
+            page = self._client.models.list()
+        except openai.AuthenticationError:
+            raise SummarizerUnavailable(
+                f"{self._label} refused the API key (summarization.api_key or OPENAI_API_KEY)."
+            ) from None
+        except openai.APIConnectionError:
+            raise SummarizerUnavailable(f"{self._label} is not reachable at {self._base_url}. Is it running?") from None
+        except openai.APIError as exc:
+            raise SummarizerUnavailable(f"{self._label} at {self._base_url} answered with an error: {exc}") from None
+        return sorted((model.id for model in page), key=str.casefold)
+
+    def problem(self) -> str | None:
+        try:
+            served = self.served_models()
+        except SummarizerUnavailable as exc:
+            return str(exc)
+        # oMLX lists every model it has downloaded, loaded or not, so a model missing
+        # from the list cannot be summarized with. Other servers may list only the
+        # models they have loaded, so they are not held to their list.
+        if self._config.backend == "omlx" and self._config.model not in served:
+            return (
+                f"oMLX does not serve the model '{self._config.model}' (summarization.model). "
+                f"`ownscribe models --json` lists the {len(served)} it serves."
+            )
+        return None
+
+    def is_available(self) -> bool:
+        return self.problem() is None
 
     def _complete(self, system_prompt: str, user_prompt: str) -> str:
         response = self._client.chat.completions.create(
